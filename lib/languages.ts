@@ -342,6 +342,15 @@ export type Language = {
   name: string;
   nativeName: string;
   speechCode: string;
+  script?: string;
+  region?: string;
+  capabilities?: {
+    textTranslation?: boolean;
+    speechRecognition?: boolean | CapabilityLevel;
+    speechSynthesis?: boolean | CapabilityLevel;
+    verified?: boolean;
+    translation?: CapabilityLevel;
+  };
 };
 
 /** Backward-compatible flat list. */

@@ -54,6 +54,7 @@ export default function SuperAdminLayout({
 
   const [authState, setAuthState] = useState<'loading' | 'unauthenticated' | 'unauthorized' | 'authorized'>('loading');
   const [adminEmail, setAdminEmail] = useState<string>('');
+  const [adminRole, setAdminRole] = useState<'superadmin' | 'admin'>('superadmin');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const checkAdminAuth = useCallback(async () => {
@@ -81,6 +82,10 @@ export default function SuperAdminLayout({
       } else if (res.status === 403) {
         setAuthState('unauthorized');
       } else if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.role) {
+          setAdminRole(data.role as 'superadmin' | 'admin');
+        }
         setAuthState('authorized');
       } else {
         setAuthState('unauthorized');
@@ -209,11 +214,17 @@ export default function SuperAdminLayout({
             <div className="flex flex-col">
               <span className="text-xs font-bold tracking-widest text-slate-200 uppercase flex items-center gap-1.5">
                 CROSSWIRE
-                <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-400 border border-rose-500/30 font-mono font-medium">
-                  SUPERADMIN
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
+                  adminRole === 'superadmin'
+                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                    : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                }`}>
+                  {adminRole === 'superadmin' ? 'SUPERADMIN' : 'ADMIN (TESTER)'}
                 </span>
               </span>
-              <span className="text-[10px] text-zinc-400 hidden sm:inline">Centralized Platform Control Console</span>
+              <span className="text-[10px] text-zinc-400 hidden sm:inline">
+                {adminRole === 'superadmin' ? 'Centralized Platform Control Console' : 'Inspection & Testing Mode (API Keys Guarded)'}
+              </span>
             </div>
           </Link>
         </div>
@@ -225,8 +236,9 @@ export default function SuperAdminLayout({
           </div>
 
           <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-300">
-            <ShieldCheck className="w-3.5 h-3.5 text-rose-400" />
+            <ShieldCheck className={`w-3.5 h-3.5 ${adminRole === 'superadmin' ? 'text-rose-400' : 'text-blue-400'}`} />
             <span className="max-w-[150px] truncate">{adminEmail}</span>
+            <span className="text-[10px] font-mono text-zinc-500 uppercase font-semibold">({adminRole})</span>
           </div>
 
           <ThemeToggle />

@@ -14,6 +14,7 @@ import {
   Copy,
   Check,
   ShieldAlert,
+  Crown,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Room, AdmissionMode, Participant } from '@/lib/types';
@@ -90,10 +91,45 @@ export default function SuperadminRoomsPage() {
       }
     };
     load();
+
+    // Supabase Realtime live sync across all tabs/devices
+    const channel = supabase
+      .channel('superadmin-rooms-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => {
+        if (!ignore) fetchRooms();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'participants' }, () => {
+        if (!ignore) fetchRooms();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests' }, () => {
+        if (!ignore) fetchRooms();
+      })
+      .subscribe();
+
     return () => {
       ignore = true;
+      supabase.removeChannel(channel);
     };
   }, [fetchRooms]);
+
+  // Instant 0ms client-side search and status filter
+  const filteredRooms = rooms.filter((r) => {
+    const q = search.toLowerCase().trim();
+    const matchesSearch =
+      !q ||
+      r.code.toLowerCase().includes(q) ||
+      r.id.toLowerCase().includes(q) ||
+      (r.host_name && r.host_name.toLowerCase().includes(q)) ||
+      (r.creator?.display_name && r.creator.display_name.toLowerCase().includes(q)) ||
+      (r.creator?.email && r.creator.email.toLowerCase().includes(q));
+
+    const matchesStatus =
+      statusFilter === 'all' ||
+      (statusFilter === 'active' && r.is_active) ||
+      (statusFilter === 'closed' && !r.is_active);
+
+    return matchesSearch && matchesStatus;
+  });
 
   const handleCopyCode = (code: string) => {
     navigator.clipboard.writeText(code);
@@ -256,7 +292,7 @@ export default function SuperadminRoomsPage() {
             <thead className="bg-slate-950/90 text-zinc-400 font-semibold border-b border-slate-800 uppercase tracking-wider text-[11px]">
               <tr>
                 <th className="py-3 px-4">Room Code & ID</th>
-                <th className="py-3 px-4">Creator</th>
+                <th className="py-3 px-4">Host / Creator</th>
                 <th className="py-3 px-4">Occupancy / Cap</th>
                 <th className="py-3 px-4">Admission Mode</th>
                 <th className="py-3 px-4">Status</th>
@@ -270,14 +306,14 @@ export default function SuperadminRoomsPage() {
                     Loading rooms...
                   </td>
                 </tr>
-              ) : rooms.length === 0 ? (
+              ) : filteredRooms.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-zinc-500">
                     No rooms found matching criteria.
                   </td>
                 </tr>
               ) : (
-                rooms.map((r) => {
+                filteredRooms.map((r) => {
                   const isFull = r.participant_count >= (r.max_capacity || 2);
                   return (
                     <tr key={r.id} className="hover:bg-slate-900/50 transition-colors">
@@ -303,11 +339,12 @@ export default function SuperadminRoomsPage() {
 
                       <td className="py-3 px-4">
                         <div className="space-y-0.5">
-                          <div className="text-zinc-200 font-medium">
-                            {r.creator?.display_name || 'Anonymous Creator'}
+                          <div className="text-zinc-200 font-semibold flex items-center gap-1.5">
+                            <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span>{r.host_name || r.creator?.display_name || 'Host'}</span>
                           </div>
                           <div className="text-[10px] text-zinc-500 font-mono">
-                            {r.creator?.email || r.creator_id?.slice(0, 8) || 'No email'}
+                            {r.creator?.email ? r.creator.email : (r.creator_id ? `ID: ${r.creator_id.slice(0, 8)}...` : 'No email')}
                           </div>
                         </div>
                       </td>

@@ -76,8 +76,17 @@ export default function SuperadminRequestsPage() {
       }
     };
     load();
+
+    const channel = supabase
+      .channel('superadmin-requests-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests' }, () => {
+        if (!ignore) fetchRequests();
+      })
+      .subscribe();
+
     return () => {
       ignore = true;
+      supabase.removeChannel(channel);
     };
   }, [fetchRequests]);
 

@@ -41,7 +41,10 @@ export function getClientIp(request: Request): string {
  * Validates JWT token signature and queries public.profiles table.
  * Rejects client-side metadata spoofing.
  */
-export async function verifySuperAdmin(request: Request): Promise<AuthResult> {
+export async function verifySuperAdmin(
+  request: Request,
+  options?: { allowAdmin?: boolean }
+): Promise<AuthResult> {
   try {
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -134,11 +137,15 @@ export async function verifySuperAdmin(request: Request): Promise<AuthResult> {
       };
     }
 
-    if (profile.role !== 'superadmin' && !isBootstrapSuperAdmin) {
+    const isSuperAdmin = profile.role === 'superadmin' || isBootstrapSuperAdmin;
+    const isAdmin = profile.role === 'admin';
+    const allowAdmin = options?.allowAdmin ?? false;
+
+    if (!isSuperAdmin && (!allowAdmin || !isAdmin)) {
       return {
         authorized: false,
         status: 403,
-        error: 'Forbidden: Superadmin role required to access this resource',
+        error: 'Forbidden: Superadmin or Admin privileges required to access this resource',
       };
     }
 

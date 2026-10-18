@@ -3,7 +3,7 @@ import { verifySuperAdmin, logAdminAction, getClientIp } from '@/lib/adminAuth';
 import type { UserRole, UserStatus } from '@/lib/types';
 
 export async function GET(request: Request) {
-  const auth = await verifySuperAdmin(request);
+  const auth = await verifySuperAdmin(request, { allowAdmin: true });
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }

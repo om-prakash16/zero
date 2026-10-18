@@ -18,6 +18,7 @@ export type Room = {
   creator_id?: string | null;
   max_capacity: number;
   admission_mode: AdmissionMode;
+  host_name?: string;
 };
 
 export type Participant = {

@@ -3,7 +3,7 @@ import { verifySuperAdmin, logAdminAction, getClientIp } from '@/lib/adminAuth';
 import type { AdmissionMode } from '@/lib/types';
 
 export async function GET(request: Request) {
-  const auth = await verifySuperAdmin(request);
+  const auth = await verifySuperAdmin(request, { allowAdmin: true });
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
@@ -68,11 +68,21 @@ export async function GET(request: Request) {
       });
     }
 
-    const enrichedRooms = (rooms || []).map((r) => ({
-      ...r,
-      creator: r.creator_id ? creatorMap[r.creator_id] || null : null,
-      pending_requests_count: pendingReqMap[r.id] || 0,
-    }));
+    const enrichedRooms = (rooms || []).map((r) => {
+      const participantsList = (r.participants as Array<{ user_id?: string; display_name?: string }>) || [];
+      const hostParticipant = participantsList.find((p) => p.user_id === r.creator_id) || participantsList[0];
+      const hostName = hostParticipant?.display_name || creatorMap[r.creator_id]?.display_name || 'Host';
+
+      return {
+        ...r,
+        host_name: hostName,
+        creator: {
+          display_name: hostName,
+          email: creatorMap[r.creator_id]?.email || '',
+        },
+        pending_requests_count: pendingReqMap[r.id] || 0,
+      };
+    });
 
     return NextResponse.json({
       success: true,

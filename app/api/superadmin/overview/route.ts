@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { verifySuperAdmin } from '@/lib/adminAuth';
 
 export async function GET(request: Request) {
-  const auth = await verifySuperAdmin(request);
+  const auth = await verifySuperAdmin(request, { allowAdmin: true });
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
@@ -56,6 +56,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
+      role: auth.profile.role,
       stats: {
         totalUsers,
         activeUsers,
