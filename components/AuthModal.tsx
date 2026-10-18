@@ -29,7 +29,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     () => false
   );
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [otpLength, setOtpLength] = useState<6 | 8>(8);
+  const [otp, setOtp] = useState<string[]>(() => Array(8).fill(''));
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
@@ -49,11 +50,11 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   // Safe close handler that resets state without cascading render effect
   const handleClose = useCallback(() => {
     setStep('email');
-    setOtp(['', '', '', '', '', '']);
+    setOtp(Array(otpLength).fill(''));
     setError(null);
     setSuccessMsg(null);
     onCloseRef.current();
-  }, []);
+  }, [otpLength]);
 
   // Auto-complete login if user clicks the magic link in their email
   useEffect(() => {
@@ -81,6 +82,15 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       return () => clearTimeout(timer);
     }
   }, [countdown]);
+
+  // Switch between 6 and 8 digit length
+  const toggleOtpLength = (length: 6 | 8) => {
+    setOtpLength(length);
+    setOtp(Array(length).fill(''));
+    setTimeout(() => {
+      otpInputsRef.current[0]?.focus();
+    }, 50);
+  };
 
   // Handle Google OAuth
   const handleGoogleSignIn = async () => {
@@ -131,7 +141,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
       setStep('otp');
       setCountdown(45);
-      setSuccessMsg(`We sent a 6-digit verification code to ${email}`);
+      setSuccessMsg(`We sent a verification code to ${email}`);
       setTimeout(() => {
         otpInputsRef.current[0]?.focus();
       }, 100);
@@ -146,15 +156,20 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   // Step 2: Handle OTP box input changes
   const handleOtpChange = (index: number, val: string) => {
     if (val.length > 1) {
-      // Pasting full 6-digit code
-      const cleaned = val.replace(/\D/g, '').slice(0, 6);
+      // Pasting code
+      const digitsOnly = val.replace(/\D/g, '');
+      const targetLen: 6 | 8 = digitsOnly.length <= 6 ? 6 : 8;
+      if (targetLen !== otpLength) {
+        setOtpLength(targetLen);
+      }
+      const cleaned = digitsOnly.slice(0, targetLen);
       if (cleaned.length > 0) {
-        const newOtp = [...otp];
-        for (let i = 0; i < 6; i++) {
+        const newOtp = Array(targetLen).fill('');
+        for (let i = 0; i < targetLen; i++) {
           newOtp[i] = cleaned[i] || '';
         }
         setOtp(newOtp);
-        const nextIndex = Math.min(cleaned.length, 5);
+        const nextIndex = Math.min(cleaned.length, targetLen - 1);
         otpInputsRef.current[nextIndex]?.focus();
       }
       return;
@@ -165,7 +180,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     setOtp(newOtp);
 
     // Auto-advance to next box
-    if (val && index < 5) {
+    if (val && index < otpLength - 1) {
       otpInputsRef.current[index + 1]?.focus();
     }
   };
@@ -181,8 +196,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const token = otp.join('').trim();
-    if (token.length !== 6) {
-      setError('Please enter all 6 digits of your verification code');
+    if (token.length !== otpLength && token.length !== 6 && token.length !== 8) {
+      setError(`Please enter your complete ${otpLength}-digit verification code`);
       return;
     }
 
@@ -359,15 +374,44 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                   ✉️ Verification Code Sent
                 </p>
                 <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-normal">
-                  Enter the 6-digit code sent to <strong className="text-slate-900 dark:text-white">{email}</strong> to sign in:
+                  Enter the {otpLength}-digit code sent to <strong className="text-slate-900 dark:text-white">{email}</strong> to sign in:
                 </p>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-zinc-300 mb-2 text-center">
-                  6-Digit Verification Code
-                </label>
-                <div className="flex justify-center gap-2 sm:gap-2.5">
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <label className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                    {otpLength}-Digit Code
+                  </label>
+                  <div className="flex items-center gap-1 text-[11px] text-slate-400 dark:text-zinc-500">
+                    <span>Format:</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleOtpLength(6)}
+                      className={`px-1.5 py-0.5 rounded font-semibold transition-colors cursor-pointer ${
+                        otpLength === 6
+                          ? 'bg-violet-600 text-white'
+                          : 'hover:text-slate-700 dark:hover:text-zinc-300'
+                      }`}
+                    >
+                      6-digit
+                    </button>
+                    <span>/</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleOtpLength(8)}
+                      className={`px-1.5 py-0.5 rounded font-semibold transition-colors cursor-pointer ${
+                        otpLength === 8
+                          ? 'bg-violet-600 text-white'
+                          : 'hover:text-slate-700 dark:hover:text-zinc-300'
+                      }`}
+                    >
+                      8-digit
+                    </button>
+                  </div>
+                </div>
+
+                <div className={`flex justify-center gap-1.5 sm:gap-2`}>
                   {otp.map((digit, idx) => (
                     <input
                       key={idx}
@@ -376,11 +420,13 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                       }}
                       type="text"
                       inputMode="numeric"
-                      maxLength={6}
+                      maxLength={otpLength}
                       value={digit}
                       onChange={(e) => handleOtpChange(idx, e.target.value)}
                       onKeyDown={(e) => handleKeyDown(idx, e)}
-                      className="h-12 w-11 sm:w-12 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/90 text-center text-xl font-bold text-slate-900 dark:text-white shadow-inner focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden focus:ring-2 focus:ring-violet-500/30 transition-all"
+                      className={`${
+                        otpLength === 8 ? 'h-11 w-9 sm:w-10 text-lg' : 'h-12 w-11 sm:w-12 text-xl'
+                      } rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/90 text-center font-bold text-slate-900 dark:text-white shadow-inner focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden focus:ring-2 focus:ring-violet-500/30 transition-all`}
                     />
                   ))}
                 </div>
@@ -388,7 +434,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
               <button
                 type="submit"
-                disabled={isLoading || otp.join('').length !== 6}
+                disabled={isLoading || otp.join('').length !== otpLength}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-600/25 transition-all hover:from-violet-500 hover:to-indigo-500 hover:shadow-lg hover:shadow-violet-600/30 focus:outline-hidden focus:ring-2 focus:ring-violet-500/40 disabled:opacity-50 cursor-pointer"
               >
                 {isLoading ? (
