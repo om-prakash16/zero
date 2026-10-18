@@ -82,7 +82,7 @@ export function ConversationRoom({
       const stored = localStorage.getItem('crosswire_muted');
       if (stored !== null) return stored === 'true';
     }
-    return false;
+    return true; // By default voice playback is muted
   });
 
   // Refs for stable callbacks & listeners
