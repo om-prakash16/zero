@@ -129,7 +129,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const handlePasswordSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      setError('Please enter your email and password');
+      setError('Please enter your email or user ID and password');
       return;
     }
 
@@ -137,8 +137,13 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       setIsLoading(true);
       setError(null);
 
+      const rawInput = email.trim().toLowerCase();
+      const resolvedEmail = (rawInput === 'prakash' || rawInput === 'admin')
+        ? 'prakash.om.global@gmail.com'
+        : rawInput;
+
       const { data, error: signInErr } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
+        email: resolvedEmail,
         password,
       });
 
@@ -540,17 +545,17 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                 <form onSubmit={handlePasswordSignIn} className="space-y-3.5">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
-                      Email Address
+                      Email Address or User ID
                     </label>
                     <div className="relative">
                       <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
                         <Mail className="h-4 w-4" />
                       </div>
                       <input
-                        type="email"
+                        type="text"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="yourname@gmail.com"
+                        placeholder="prakash or you@example.com"
                         required
                         className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
                       />

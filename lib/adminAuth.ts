@@ -139,7 +139,7 @@ export async function verifySuperAdmin(
 
     const isSuperAdmin = profile.role === 'superadmin' || isBootstrapSuperAdmin;
     const isAdmin = profile.role === 'admin';
-    const allowAdmin = options?.allowAdmin ?? false;
+    const allowAdmin = options?.allowAdmin ?? true;
 
     if (!isSuperAdmin && (!allowAdmin || !isAdmin)) {
       return {

@@ -211,7 +211,7 @@ export function Navbar({ onStartArgument, onJoinRoom }: NavbarProps) {
                 onClick={() => scrollToSection('languages')}
                 className="flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-left transition-colors cursor-pointer"
               >
-                <span>Supported Languages (12)</span>
+                <span>Supported Languages</span>
                 <Globe className="w-4 h-4 text-slate-400 dark:text-zinc-500" />
               </button>
             </div>

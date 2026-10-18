@@ -75,7 +75,7 @@ export async function GET(request: Request) {
       systemHealth: {
         database: 'operational',
         auth: 'healthy',
-        gemini: 'active (gemini-2.5-flash)',
+        gemini: 'active (operational)',
       },
     });
   } catch (err: unknown) {

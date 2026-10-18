@@ -103,7 +103,7 @@ export default function HomePage() {
           <Radio className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
           <span>Multilingual Live Argument Protocol</span>
           <span className="text-slate-300 dark:text-zinc-700">•</span>
-          <span className="text-slate-500 dark:text-zinc-500">{SUPPORTED_LANGUAGES.length}+ Languages</span>
+          <span className="text-slate-500 dark:text-zinc-500">Multilingual conversations</span>
         </div>
 
         {/* Headline */}
@@ -253,7 +253,7 @@ export default function HomePage() {
                 Pick Your Tongues
               </h3>
               <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
-                Choose any of 12 supported languages. Speak in your language; your partner hears it in theirs without hesitation.
+                Choose your preferred language. Speak in your language; your partner hears it in theirs without hesitation.
               </p>
             </div>
 

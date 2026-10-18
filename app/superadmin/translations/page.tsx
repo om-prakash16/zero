@@ -101,7 +101,7 @@ export default function SuperadminTranslationsPage() {
             </span>
           </h1>
           <p className="text-xs sm:text-sm text-zinc-400 mt-0.5">
-            Operational telemetry for Gemini translation pipeline, latency metrics, and language pair traffic.
+            Operational telemetry for real-time translation pipeline, latency metrics, and language pair traffic.
           </p>
         </div>
 
@@ -145,7 +145,7 @@ export default function SuperadminTranslationsPage() {
         <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5 shadow-xs">
           <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">Avg AI Latency</div>
           <div className="text-3xl font-bold text-blue-400">{data?.modelStatus.averageLatencyMs ?? 420}ms</div>
-          <div className="text-xs text-blue-400/80 mt-2">Gemini 2.5 Flash response window</div>
+          <div className="text-xs text-blue-400/80 mt-2">Real-time AI response window</div>
         </div>
       </div>
 
@@ -167,7 +167,7 @@ export default function SuperadminTranslationsPage() {
                 <span className="text-zinc-400 text-[11px]">Primary production inference target</span>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono font-medium">
-                {data?.modelStatus.primary || 'gemini-2.5-flash (Online)'}
+                {data?.modelStatus.primary || 'Neural Engine (Online)'}
               </span>
             </div>
 
@@ -177,7 +177,7 @@ export default function SuperadminTranslationsPage() {
                 <span className="text-zinc-400 text-[11px]">Engaged automatically on 429 quota or 503 load</span>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono font-medium">
-                {data?.modelStatus.fallback || 'gemini-2.0-flash, gemini-1.5-flash'}
+                {data?.modelStatus.fallback || 'Autonomous Multi-Tier Fallback'}
               </span>
             </div>
 
@@ -187,7 +187,7 @@ export default function SuperadminTranslationsPage() {
                 <span className="text-zinc-400 text-[11px]">Server-side isolated execution</span>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-mono font-medium">
-                Secured & Masked
+                Secured & Masked (••••••••••••)
               </span>
             </div>
           </div>

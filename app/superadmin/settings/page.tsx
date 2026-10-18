@@ -20,7 +20,6 @@ export default function SuperadminSettingsPage() {
   const [defaultCapacity, setDefaultCapacity] = useState(2);
   const [maxCapacity, setMaxCapacity] = useState(16);
   const [defaultAdmissionMode, setDefaultAdmissionMode] = useState('approval_required');
-  const [translationModel, setTranslationModel] = useState('gemini-2.5-flash');
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [auditReason, setAuditReason] = useState('');
 
@@ -46,7 +45,6 @@ export default function SuperadminSettingsPage() {
       if (s.default_room_capacity !== undefined) setDefaultCapacity(Number(s.default_room_capacity));
       if (s.max_permitted_capacity !== undefined) setMaxCapacity(Number(s.max_permitted_capacity));
       if (s.default_admission_mode !== undefined) setDefaultAdmissionMode(String(s.default_admission_mode));
-      if (s.translation_model !== undefined) setTranslationModel(String(s.translation_model));
       if (s.maintenance_mode !== undefined) setMaintenanceMode(Boolean(s.maintenance_mode));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error fetching settings';
@@ -258,33 +256,28 @@ export default function SuperadminSettingsPage() {
           </div>
         </div>
 
-        {/* Card 4: Translation Model */}
+        {/* Card 4: Translation Engine Configuration */}
         <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5 shadow-xs space-y-4">
           <div>
-            <h3 className="text-sm font-semibold text-white">Primary AI Translation Model</h3>
+            <h3 className="text-sm font-semibold text-white">High-Throughput Translation Pipeline</h3>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Select primary Google Gemini model used for live translation.
+              Automated multi-tier translation pipeline with quota protection and fallback routing.
             </p>
           </div>
 
-          <div className="space-y-2">
-            <select
-              value={translationModel}
-              onChange={(e) => setTranslationModel(e.target.value)}
-              className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-hidden focus:border-rose-500 font-mono"
-            >
-              <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended)</option>
-              <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-              <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-            </select>
-            <button
-              onClick={() => handleSaveSetting('translation_model', translationModel)}
-              disabled={isSaving}
-              className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Update Model Configuration</span>
-            </button>
+          <div className="space-y-2.5">
+            <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-between text-xs">
+              <span className="text-zinc-300 font-medium">Inference Architecture</span>
+              <span className="font-mono text-emerald-400 font-semibold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                Active & Autonomous
+              </span>
+            </div>
+            <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-between text-xs">
+              <span className="text-zinc-300 font-medium">API Keys & Credentials</span>
+              <span className="font-mono text-purple-400 font-semibold px-2 py-0.5 rounded bg-purple-500/10 border border-purple-500/20">
+                •••••••••••• (Encrypted)
+              </span>
+            </div>
           </div>
         </div>
 

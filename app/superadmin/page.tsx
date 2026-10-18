@@ -279,7 +279,7 @@ export default function SuperadminOverviewPage() {
               </div>
 
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80">
-                <span className="text-zinc-300 font-medium">Gemini 2.5 AI Engine</span>
+                <span className="text-zinc-300 font-medium">Real-Time AI Pipeline</span>
                 <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   {systemHealth?.gemini || 'Active'}

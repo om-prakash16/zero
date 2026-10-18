@@ -41,7 +41,7 @@ export function Footer() {
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <span>Real-Time Neural Speech Engine</span>
               <span className="text-slate-400 dark:text-zinc-600">•</span>
-              <span className="text-slate-500 dark:text-zinc-400">100+ Languages</span>
+              <span className="text-slate-500 dark:text-zinc-400">Multilingual conversations</span>
             </div>
           </div>
 

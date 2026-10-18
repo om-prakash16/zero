@@ -52,8 +52,8 @@ export async function GET(request: Request) {
         pending,
         successRate: total > 0 ? Math.round((completed / total) * 100) : 100,
         modelStatus: {
-          primary: 'gemini-2.5-flash (Online)',
-          fallback: 'gemini-2.0-flash, gemini-1.5-flash (Standby)',
+          primary: 'Neural Translation Engine (Online)',
+          fallback: 'Autonomous Multi-Tier Fallback (Standby)',
           averageLatencyMs: 420,
         },
         topLanguagePairs: topPairs,
