@@ -135,7 +135,7 @@ export default function HomePage() {
         )}
 
         {/* Interactive Action Hub */}
-        <div className="mt-10 w-full max-w-lg minimal-card rounded-2xl p-6 sm:p-7 text-left shadow-md">
+        <div className="mt-10 w-full max-w-lg minimal-card rounded-2xl p-6 sm:p-7 text-left shadow-lg border border-slate-200/90 dark:border-zinc-800/90">
           <div className="space-y-5">
             {/* Action 1: Create room */}
             <div id="create">
@@ -143,24 +143,24 @@ export default function HomePage() {
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
                   Option 1 · Start New Session
                 </span>
-                <span className="text-xs text-rose-600 dark:text-rose-400 font-medium flex items-center gap-1">
-                  <Flame className="w-3.5 h-3.5" /> Instant Host
+                <span className="text-xs text-[#B5282A] dark:text-[#ff6b6d] font-semibold flex items-center gap-1">
+                  <Flame className="w-3.5 h-3.5 text-[#FFAA00]" /> Instant Host
                 </span>
               </div>
               <button
                 onClick={() => setIsCreateModalOpen(true)}
                 type="button"
-                className="w-full h-12 flex items-center justify-center gap-2.5 px-6 rounded-xl font-medium text-sm text-white bg-rose-600 hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-500 transition-all shadow-xs active:scale-[0.99] cursor-pointer"
+                className="w-full h-12 flex items-center justify-center gap-2.5 px-6 rounded-xl font-semibold text-sm text-white bg-[#B5282A] hover:bg-[#9E1B1D] transition-all shadow-md shadow-[#B5282A]/25 active:scale-[0.99] cursor-pointer"
               >
-                <Mic className="w-4 h-4" />
+                <Mic className="w-4 h-4 text-[#FFAA00]" />
                 <span>Create Room (Start an Argument)</span>
-                <ArrowRight className="w-4 h-4 ml-0.5" />
+                <ArrowRight className="w-4 h-4 ml-0.5 text-white" />
               </button>
             </div>
 
             <div className="relative flex items-center justify-center">
               <div className="w-full border-t border-slate-200 dark:border-zinc-800" />
-              <span className="absolute px-3 bg-white dark:bg-[#121215] text-[11px] uppercase tracking-wider text-slate-400 dark:text-zinc-500 font-medium">
+              <span className="absolute px-3 bg-white dark:bg-[#121215] text-[11px] uppercase tracking-wider text-slate-400 dark:text-zinc-500 font-semibold">
                 or
               </span>
             </div>
@@ -186,26 +186,29 @@ export default function HomePage() {
                     }}
                     placeholder="Enter code or paste link (e.g. fire-lion-61)"
                     maxLength={120}
-                    className="w-full h-11 pl-10 pr-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-xs sm:text-sm font-mono focus:bg-white dark:focus:bg-zinc-900 focus:border-slate-800 dark:focus:border-zinc-600 outline-hidden transition-colors"
+                    className="w-full h-11 pl-10 pr-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-xs sm:text-sm font-mono focus:bg-white dark:focus:bg-zinc-900 focus:border-[#B5282A] outline-hidden transition-colors"
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={isJoining || !joinCode.trim()}
-                  className="h-11 px-5 rounded-xl font-medium text-sm bg-slate-900 hover:bg-slate-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shadow-xs cursor-pointer flex items-center gap-1.5"
+                  className="h-11 px-5 rounded-xl font-semibold text-sm bg-[#FFAA00] hover:bg-[#E69900] text-slate-950 disabled:opacity-50 disabled:cursor-not-allowed transition-all whitespace-nowrap shadow-sm shadow-[#FFAA00]/25 cursor-pointer flex items-center gap-1.5"
                 >
                   {isJoining ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
                       <span>Joining...</span>
                     </>
                   ) : (
-                    <span>Join Room</span>
+                    <>
+                      <span>Join Room</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
                   )}
                 </button>
               </form>
               {error && (
-                <p className="mt-2.5 text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                <p className="mt-2.5 text-xs text-[#B5282A] dark:text-[#ff6b6d] flex items-center gap-1.5">
                   <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
                   {error}
                 </p>
@@ -214,20 +217,41 @@ export default function HomePage() {
           </div>
         </div>
 
+        {/* Kaladhara-Style Highlight Stats Banner */}
+        <div className="mt-12 w-full max-w-4xl bg-gradient-to-r from-[#B5282A] to-[#9E1B1D] text-white rounded-2xl p-6 sm:p-7 shadow-lg grid grid-cols-2 sm:grid-cols-4 gap-6 text-center">
+          <div>
+            <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">&lt; 450ms</div>
+            <div className="text-xs text-white/80 mt-1 font-medium">Real-Time Latency</div>
+          </div>
+          <div>
+            <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#FFAA00]">100%</div>
+            <div className="text-xs text-white/80 mt-1 font-medium">Natural Dialogue</div>
+          </div>
+          <div>
+            <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">Instant</div>
+            <div className="text-xs text-white/80 mt-1 font-medium">Voice Interruption</div>
+          </div>
+          <div>
+            <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#FFAA00]">No Login</div>
+            <div className="text-xs text-white/80 mt-1 font-medium">Instant Guest Entry</div>
+          </div>
+        </div>
+
         {/* Section: How It Works */}
         <section
           id="how-it-works"
           aria-label="How it works"
-          className="mt-20 max-w-4xl w-full text-left scroll-mt-24"
+          className="mt-16 max-w-4xl w-full text-left scroll-mt-24"
         >
           <div className="text-center mb-10">
-            <span className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#B5282A] dark:text-[#ff6b6d]">
               Voice-First Workflow
             </span>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white mt-1">
               How CROSSWIRE Works
             </h2>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-zinc-400 mt-2 max-w-md mx-auto">
+            <div className="w-14 h-1 bg-[#B5282A] rounded-full mx-auto mt-2" />
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-zinc-400 mt-2.5 max-w-md mx-auto">
               Natural real-time debate in three friction-free steps.
             </p>
           </div>

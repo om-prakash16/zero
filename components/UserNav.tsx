@@ -187,7 +187,7 @@ export function UserNav() {
       ) : (
         <button
           onClick={() => setIsAuthOpen(true)}
-          className="flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-600/10 hover:bg-violet-600/20 px-3.5 py-1.5 text-xs font-medium text-violet-300 hover:text-violet-200 transition-all hover:border-violet-500/60 shadow-sm cursor-pointer"
+          className="flex items-center gap-2 rounded-xl border border-[#B5282A]/30 bg-[#B5282A]/10 hover:bg-[#B5282A]/20 px-3.5 py-1.5 text-xs font-semibold text-[#B5282A] dark:text-[#ff6b6d] transition-all hover:border-[#B5282A]/50 shadow-xs cursor-pointer"
         >
           <LogIn className="h-3.5 w-3.5" />
           <span>Sign In</span>

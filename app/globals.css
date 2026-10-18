@@ -3,31 +3,40 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-poppins: var(--font-poppins), 'Poppins', sans-serif;
+  --font-inter: var(--font-inter), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   
+  /* Kaladhara Design Tokens */
+  --kaladhara-red: #B5282A;
+  --kaladhara-red-hover: #9E1B1D;
+  --kaladhara-red-subtle: #fdf2f2;
+  --kaladhara-gold: #FFAA00;
+  --kaladhara-gold-hover: #E69900;
+  --kaladhara-gold-subtle: #fffbeb;
+
   /* Participant accents - Light mode */
-  --accent-a: #e04434;     /* Crisp coral-crimson for participant A */
+  --accent-a: #B5282A;     /* Kaladhara royal crimson for participant A */
   --accent-b: #0284c7;     /* Clear azure-blue for participant B */
-  --accent-a-subtle: #fef2f2;
+  --accent-a-subtle: #fdf2f2;
   --accent-b-subtle: #f0f9ff;
   --accent-a-border: #fecaca;
   --accent-b-border: #bae6fd;
   
   /* Status colors */
   --status-listening: #16a34a;
-  --status-speaking: #d97706;
+  --status-speaking: #FFAA00;
   --status-translating: #7c3aed;
   --status-playing: #0284c7;
-  --status-interrupted: #dc2626;
-  --status-error: #dc2626;
+  --status-interrupted: #B5282A;
+  --status-error: #B5282A;
 
   /* Surfaces & Borders (Light) */
   --bg-page: #f8fafc;
   --bg-card: #ffffff;
   --border-card: #e2e8f0;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
+  --text-primary: #1e2022;
+  --text-secondary: #4c4c4c;
+  --text-muted: #6b6b6b;
 }
 
 .dark {
@@ -66,7 +75,7 @@ html {
 }
 
 body {
-  font-family: var(--font-inter), system-ui, sans-serif;
+  font-family: var(--font-poppins), var(--font-inter), system-ui, sans-serif;
   background-color: var(--bg-page);
   color: var(--text-primary);
   min-height: 100vh;

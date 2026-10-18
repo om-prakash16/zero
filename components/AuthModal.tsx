@@ -18,6 +18,7 @@ import {
   Eye,
   EyeOff,
   Crown,
+  HelpCircle,
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -35,30 +36,19 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     () => false
   );
 
-  // Mode: 'signin' or 'signup'
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  // Signin sub-method: 'password' or 'otp'
+  // Mode: 'signin' | 'signup' | 'forgot_password' | 'update_password'
+  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot_password' | 'update_password'>('signin');
   const [signInMethod, setSignInMethod] = useState<'password' | 'otp'>('password');
-
-  // Sign up multi-step: 'profile' -> 'otp' -> 'credentials'
-  const [signUpStep, setSignUpStep] = useState<'profile' | 'otp' | 'credentials'>('profile');
 
   // Form Fields
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-
-  // Profile Fields for Sign Up
-  const [fullName, setFullName] = useState('');
-  const [age, setAge] = useState('');
-  const [gender, setGender] = useState('Prefer not to say');
-
-  // Step 3 Credentials
-  const [username, setUsername] = useState('');
-  const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // 8-Digit OTP State (strictly 8 digits)
+  // 8-Digit OTP State for alternative sign-in
   const [otp, setOtp] = useState<string[]>(() => Array(8).fill(''));
   const [countdown, setCountdown] = useState(0);
 
@@ -77,14 +67,29 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     onCloseRef.current = onClose;
   }, [onSuccess, onClose]);
 
+  // Listen for Supabase PASSWORD_RECOVERY event
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setMode('update_password');
+        setError(null);
+        setSuccessMsg('You are verified! Please enter your new password.');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   // Safe close handler
   const handleClose = useCallback(() => {
     setMode('signin');
     setSignInMethod('password');
-    setSignUpStep('profile');
     setOtp(Array(8).fill(''));
     setPassword('');
-    setNewPassword('');
     setConfirmPassword('');
     setError(null);
     setSuccessMsg(null);
@@ -99,7 +104,12 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     }
   }, [countdown]);
 
-  // Handle Google OAuth
+  // Email format validation helper
+  const isValidEmail = (val: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+  };
+
+  // Google OAuth
   const handleGoogleSignIn = async () => {
     try {
       setIsGoogleLoading(true);
@@ -138,16 +148,28 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       setError(null);
 
       const rawInput = email.trim().toLowerCase();
-      const resolvedEmail = (rawInput === 'prakash' || rawInput === 'admin')
-        ? 'prakash.om.global@gmail.com'
-        : rawInput;
+      const resolvedEmail =
+        rawInput === 'prakash' || rawInput === 'admin'
+          ? 'prakash.om.global@gmail.com'
+          : rawInput;
 
       const { data, error: signInErr } = await supabase.auth.signInWithPassword({
         email: resolvedEmail,
         password,
       });
 
-      if (signInErr) throw signInErr;
+      if (signInErr) {
+        if (
+          signInErr.message.includes('Invalid login credentials') ||
+          signInErr.message.includes('invalid_credentials')
+        ) {
+          throw new Error('Invalid email or password. Please verify your credentials and try again.');
+        } else if (signInErr.message.includes('Email not confirmed')) {
+          throw new Error('Email not yet confirmed. Please check your inbox for the confirmation link.');
+        } else {
+          throw signInErr;
+        }
+      }
 
       if (data.session) {
         setSuccessMsg('Welcome back! Successfully signed in.');
@@ -164,7 +186,149 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     }
   };
 
-  // 2. SIGN IN WITH 8-DIGIT OTP
+  // 2. SIGN UP WITH EMAIL & PASSWORD
+  const handleEmailSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!fullName.trim()) {
+      setError('Please enter your full name');
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setError('Please enter a valid email address (e.g., name@example.com)');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match. Please re-enter your password confirmation.');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const trimmedEmail = email.trim().toLowerCase();
+      const isSuperAdmin = trimmedEmail === 'prakash.om.global@gmail.com';
+
+      const { data, error: signUpErr } = await supabase.auth.signUp({
+        email: trimmedEmail,
+        password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            name: fullName.trim(),
+            role: isSuperAdmin ? 'superadmin' : 'user',
+          },
+        },
+      });
+
+      if (signUpErr) {
+        if (
+          signUpErr.message.includes('User already registered') ||
+          signUpErr.message.includes('already exists')
+        ) {
+          throw new Error('An account with this email already exists. Please sign in instead.');
+        } else {
+          throw signUpErr;
+        }
+      }
+
+      // Check if user already exists (Supabase returns empty identities array when email enumeration protection is on)
+      if (data.user && (!data.user.identities || data.user.identities.length === 0)) {
+        throw new Error('An account with this email already exists. Please sign in instead.');
+      }
+
+      if (data.session) {
+        setSuccessMsg('Account created successfully! Welcome to CROSSWIRE.');
+        setTimeout(() => {
+          handleClose();
+          onSuccessRef.current?.();
+        }, 800);
+      } else {
+        setSuccessMsg('Account registered! A confirmation link has been sent to your email.');
+        setTimeout(() => {
+          setMode('signin');
+        }, 2000);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Registration failed. Please try again.';
+      setError(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 3. PASSWORD RESET REQUEST
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!isValidEmail(trimmedEmail)) {
+      setError('Please enter a valid email address to receive password reset instructions');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const redirectUrl = `${window.location.origin}/auth/callback?next=/`;
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: redirectUrl,
+      });
+
+      if (resetErr) throw resetErr;
+
+      setSuccessMsg(`Password reset instructions sent to ${trimmedEmail}. Please check your inbox.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to send password reset email';
+      setError(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 4. UPDATE PASSWORD (When authenticated via recovery link)
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (password.length < 6) {
+      setError('New password must be at least 6 characters long');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const { error: updateErr } = await supabase.auth.updateUser({
+        password,
+      });
+
+      if (updateErr) throw updateErr;
+
+      setSuccessMsg('Password updated successfully! Welcome back.');
+      setTimeout(() => {
+        handleClose();
+        onSuccessRef.current?.();
+      }, 800);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update password';
+      setError(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 5. SIGN IN WITH 8-DIGIT OTP
   const handleSendSignInOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !email.includes('@')) {
@@ -199,64 +363,9 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     }
   };
 
-  // 3. SIGN UP STEP 1: Send OTP with Profile Metadata
-  const handleSignUpStart = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!fullName.trim()) {
-      setError('Please enter your name');
-      return;
-    }
-    const ageNum = parseInt(age, 10);
-    if (!age || isNaN(ageNum) || ageNum < 5 || ageNum > 120) {
-      setError('Please enter a valid age (between 5 and 120)');
-      return;
-    }
-    if (!email || !email.includes('@')) {
-      setError('Please enter a valid email address');
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      setError(null);
-
-      const isSuperAdmin = email.trim().toLowerCase() === 'prakash.om.global@gmail.com';
-
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email: email.trim().toLowerCase(),
-        options: {
-          shouldCreateUser: true,
-          data: {
-            full_name: fullName.trim(),
-            name: fullName.trim(),
-            age: ageNum,
-            gender,
-            role: isSuperAdmin ? 'super_admin' : 'user',
-            is_super_admin: isSuperAdmin,
-          },
-        },
-      });
-
-      if (otpError) throw otpError;
-
-      setSignUpStep('otp');
-      setCountdown(45);
-      setSuccessMsg(`8-digit verification code sent to ${email}`);
-      setTimeout(() => {
-        otpInputsRef.current[0]?.focus();
-      }, 100);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to send verification code';
-      setError(msg);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // Handle 8-Digit OTP Input
   const handleOtpChange = (index: number, val: string) => {
     if (val.length > 1) {
-      // Pasted code
       const cleaned = val.replace(/\D/g, '').slice(0, 8);
       if (cleaned.length > 0) {
         const newOtp = Array(8).fill('');
@@ -274,7 +383,6 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     newOtp[index] = val;
     setOtp(newOtp);
 
-    // Auto-advance to next box
     if (val && index < 7) {
       otpInputsRef.current[index + 1]?.focus();
     }
@@ -286,7 +394,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     }
   };
 
-  // 4. VERIFY OTP
+  // VERIFY OTP
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const token = otp.join('').trim();
@@ -307,19 +415,12 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
       if (verifyError) throw verifyError;
 
-      if (mode === 'signup') {
-        // Proceed to Step 3: Create User ID and Password
-        setSignUpStep('credentials');
-        setSuccessMsg('Email verified! Now set up your User ID and Password.');
-      } else {
-        // Sign-in completed
-        if (data.session) {
-          setSuccessMsg('Successfully signed in!');
-          setTimeout(() => {
-            handleClose();
-            onSuccessRef.current?.();
-          }, 600);
-        }
+      if (data.session) {
+        setSuccessMsg('Successfully signed in!');
+        setTimeout(() => {
+          handleClose();
+          onSuccessRef.current?.();
+        }, 600);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Invalid code. Please try again.';
@@ -329,59 +430,11 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     }
   };
 
-  // 5. SIGN UP STEP 3: Create User ID and Password
-  const handleCreateCredentials = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username.trim()) {
-      setError('Please choose a User ID / Username');
-      return;
-    }
-    if (newPassword.length < 6) {
-      setError('Password must be at least 6 characters long');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      setError(null);
-
-      const isSuperAdmin = email.trim().toLowerCase() === 'prakash.om.global@gmail.com';
-
-      const { error: updateErr } = await supabase.auth.updateUser({
-        password: newPassword,
-        data: {
-          username: username.trim().toLowerCase(),
-          full_name: fullName.trim(),
-          name: fullName.trim(),
-          age: parseInt(age, 10),
-          gender,
-          role: isSuperAdmin ? 'super_admin' : 'user',
-          is_super_admin: isSuperAdmin,
-        },
-      });
-
-      if (updateErr) throw updateErr;
-
-      setSuccessMsg('Account created successfully with User ID & Password!');
-      setTimeout(() => {
-        handleClose();
-        onSuccessRef.current?.();
-      }, 800);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to set password';
-      setError(msg);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   if (!isOpen || !isClient) return null;
 
-  const isSuperAdminUser = email.trim().toLowerCase() === 'prakash.om.global@gmail.com';
+  const isSuperAdminUser =
+    email.trim().toLowerCase() === 'prakash.om.global@gmail.com' ||
+    email.trim().toLowerCase() === 'prakash';
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] overflow-y-auto">
@@ -395,10 +448,6 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       <div className="flex min-h-screen items-center justify-center p-4 sm:p-6 text-center">
         {/* Modal Card */}
         <div className="relative w-full max-w-md transform overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 sm:p-8 text-left shadow-2xl backdrop-blur-xl transition-all my-8">
-          {/* Subtle Ambient Glow */}
-          <div className="absolute -top-24 -left-24 h-48 w-48 rounded-full bg-violet-600/15 dark:bg-violet-600/25 blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-24 -right-24 h-48 w-48 rounded-full bg-indigo-600/15 dark:bg-indigo-600/25 blur-3xl pointer-events-none" />
-
           {/* Close Button */}
           <button
             onClick={handleClose}
@@ -418,9 +467,11 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
           {/* Header */}
           <div className="mb-5 text-center">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-500/25">
-              {mode === 'signup' && signUpStep === 'credentials' ? (
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#B5282A] to-[#FFAA00] text-white shadow-lg shadow-[#B5282A]/25">
+              {mode === 'signup' ? (
                 <Sparkles className="h-6 w-6" />
+              ) : mode === 'forgot_password' || mode === 'update_password' ? (
+                <HelpCircle className="h-6 w-6" />
               ) : (
                 <KeyRound className="h-6 w-6" />
               )}
@@ -428,31 +479,32 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
               {mode === 'signin'
                 ? 'Sign In to CROSSWIRE'
-                : signUpStep === 'profile'
+                : mode === 'signup'
                 ? 'Create Your Account'
-                : signUpStep === 'otp'
-                ? 'Verify Email'
-                : 'Create User ID & Password'}
+                : mode === 'forgot_password'
+                ? 'Reset Your Password'
+                : 'Set New Password'}
             </h2>
             <p className="mt-1 text-xs text-slate-500 dark:text-zinc-400">
               {mode === 'signin'
                 ? 'Access your speaker profile and multilingual debate rooms'
-                : signUpStep === 'profile'
-                ? 'Provide your speaker details to get started'
-                : signUpStep === 'otp'
-                ? `Enter the 8-digit code sent to ${email}`
-                : 'Set your permanent login credentials'}
+                : mode === 'signup'
+                ? 'Sign up with email and password to start debating'
+                : mode === 'forgot_password'
+                ? 'Enter your email address to receive reset instructions'
+                : 'Choose a strong password with at least 6 characters'}
             </p>
           </div>
 
           {/* Mode Switch Tabs (Sign In vs Create Account) */}
-          {(mode === 'signin' || (mode === 'signup' && signUpStep === 'profile')) && (
+          {(mode === 'signin' || mode === 'signup') && (
             <div className="mb-5 flex rounded-xl bg-slate-100 dark:bg-zinc-800/80 p-1">
               <button
                 type="button"
                 onClick={() => {
                   setMode('signin');
                   setError(null);
+                  setSuccessMsg(null);
                 }}
                 className={`flex-1 rounded-lg py-1.5 text-xs font-semibold transition-all cursor-pointer ${
                   mode === 'signin'
@@ -466,8 +518,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                 type="button"
                 onClick={() => {
                   setMode('signup');
-                  setSignUpStep('profile');
                   setError(null);
+                  setSuccessMsg(null);
                 }}
                 className={`flex-1 rounded-lg py-1.5 text-xs font-semibold transition-all cursor-pointer ${
                   mode === 'signup'
@@ -480,17 +532,18 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             </div>
           )}
 
-          {/* Feedback Alerts */}
+          {/* Error Message */}
           {error && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-600 dark:text-rose-400">
-              <AlertCircle className="h-4 w-4 shrink-0" />
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-600 dark:text-rose-400">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
 
-          {successMsg && !error && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-600 dark:text-emerald-400">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
+          {/* Success Message */}
+          {successMsg && (
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
               <span>{successMsg}</span>
             </div>
           )}
@@ -536,7 +589,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
               <div className="relative flex items-center justify-center py-1">
                 <div className="grow border-t border-slate-200 dark:border-zinc-800" />
                 <span className="mx-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-zinc-500">
-                  or sign in with password / otp
+                  or sign in with password
                 </span>
                 <div className="grow border-t border-slate-200 dark:border-zinc-800" />
               </div>
@@ -557,7 +610,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                         onChange={(e) => setEmail(e.target.value)}
                         placeholder="prakash or you@example.com"
                         required
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
                       />
                     </div>
                   </div>
@@ -569,10 +622,14 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                       </label>
                       <button
                         type="button"
-                        onClick={handleSendSignInOtp}
-                        className="text-[11px] text-violet-600 dark:text-violet-400 hover:underline cursor-pointer"
+                        onClick={() => {
+                          setMode('forgot_password');
+                          setError(null);
+                          setSuccessMsg(null);
+                        }}
+                        className="text-[11px] text-[#B5282A] dark:text-[#ff6b6d] hover:underline cursor-pointer"
                       >
-                        Sign in with 8-digit OTP instead
+                        Forgot password?
                       </button>
                     </div>
                     <div className="relative">
@@ -585,7 +642,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                         onChange={(e) => setPassword(e.target.value)}
                         placeholder="••••••••"
                         required
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-10 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-10 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
                       />
                       <button
                         type="button"
@@ -600,15 +657,25 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                   <button
                     type="submit"
                     disabled={isLoading || !email || !password}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-violet-600/25 transition-all hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 cursor-pointer"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B5282A] hover:bg-[#9E1B1D] px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-[#B5282A]/25 transition-all disabled:opacity-50 cursor-pointer"
                   >
                     {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <span>Sign In</span>}
                   </button>
+
+                  <div className="text-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setSignInMethod('otp')}
+                      className="text-[11px] text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:underline cursor-pointer"
+                    >
+                      Sign in with OTP code instead
+                    </button>
+                  </div>
                 </form>
               ) : (
                 /* Sign in with 8-digit OTP */
                 <form onSubmit={handleVerifyOtp} className="space-y-4">
-                  <div className="p-3 rounded-xl border border-violet-500/25 bg-violet-500/5 dark:bg-violet-500/10 text-center">
+                  <div className="p-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-800/50 text-center">
                     <p className="text-[11px] text-slate-600 dark:text-zinc-400">
                       8-digit verification code sent to <strong className="text-slate-900 dark:text-white">{email}</strong>
                     </p>
@@ -631,7 +698,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                           value={digit}
                           onChange={(e) => handleOtpChange(idx, e.target.value)}
                           onKeyDown={(e) => handleKeyDown(idx, e)}
-                          className="h-11 w-8 sm:w-9 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 text-center text-lg font-bold text-slate-900 dark:text-white shadow-inner focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                          className="h-11 w-8 sm:w-9 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 text-center text-lg font-bold text-slate-900 dark:text-white shadow-inner focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
                         />
                       ))}
                     </div>
@@ -640,7 +707,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                   <button
                     type="submit"
                     disabled={isLoading || otp.join('').length !== 8}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-violet-600/25 transition-all hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 cursor-pointer"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B5282A] hover:bg-[#9E1B1D] px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-[#B5282A]/25 transition-all disabled:opacity-50 cursor-pointer"
                   >
                     {isLoading ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -666,7 +733,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                       <button
                         type="button"
                         onClick={handleSendSignInOtp}
-                        className="text-violet-600 dark:text-violet-400 hover:underline cursor-pointer"
+                        className="text-[#B5282A] dark:text-[#ff6b6d] hover:underline cursor-pointer"
                       >
                         Resend Code
                       </button>
@@ -678,267 +745,248 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           )}
 
           {/* ================================================================= */}
-          {/* TAB 2: SIGN UP / REGISTRATION MODE */}
+          {/* TAB 2: SIGN UP / REGISTRATION MODE (Direct Email & Password) */}
           {/* ================================================================= */}
           {mode === 'signup' && (
-            <div>
-              {/* STEP 1: Name, Age, Gender, Email */}
-              {signUpStep === 'profile' && (
-                <form onSubmit={handleSignUpStart} className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
-                      Full Name
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
-                        <UserIcon className="h-4 w-4" />
-                      </div>
-                      <input
-                        type="text"
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        placeholder="e.g. Alex Smith"
-                        required
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
-                      />
-                    </div>
+            <form onSubmit={handleEmailSignUp} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
+                    <UserIcon className="h-4 w-4" />
                   </div>
+                  <input
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="e.g. Alex Smith"
+                    required
+                    className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                  />
+                </div>
+              </div>
 
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
-                        Age
-                      </label>
-                      <input
-                        type="number"
-                        min="5"
-                        max="120"
-                        value={age}
-                        onChange={(e) => setAge(e.target.value)}
-                        placeholder="e.g. 24"
-                        required
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 px-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
-                        Gender
-                      </label>
-                      <select
-                        value={gender}
-                        onChange={(e) => setGender(e.target.value)}
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 px-3 py-2 text-xs text-slate-900 dark:text-white focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden cursor-pointer"
-                      >
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Non-binary">Non-binary</option>
-                        <option value="Other">Other</option>
-                        <option value="Prefer not to say">Prefer not to say</option>
-                      </select>
-                    </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
+                    <Mail className="h-4 w-4" />
                   </div>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    required
+                    className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                  />
+                </div>
+              </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
-                      Email Address
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
-                        <Mail className="h-4 w-4" />
-                      </div>
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="name@example.com"
-                        required
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
-                      />
-                    </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  Create Password (minimum 6 characters)
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
+                    <Lock className="h-4 w-4" />
                   </div>
-
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    required
+                    minLength={6}
+                    className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-10 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                  />
                   <button
-                    type="submit"
-                    disabled={isLoading || !fullName || !age || !email}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-violet-600/25 transition-all hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 cursor-pointer pt-2"
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 cursor-pointer"
                   >
-                    {isLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <>
-                        <span>Send 8-Digit Verification Code</span>
-                        <ArrowRight className="h-4 w-4" />
-                      </>
-                    )}
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
-                </form>
-              )}
+                </div>
+              </div>
 
-              {/* STEP 2: 8-Digit OTP Verification */}
-              {signUpStep === 'otp' && (
-                <form onSubmit={handleVerifyOtp} className="space-y-4">
-                  <div className="p-3 rounded-xl border border-violet-500/25 bg-violet-500/5 dark:bg-violet-500/10 text-center">
-                    <p className="text-[11px] text-slate-600 dark:text-zinc-400">
-                      Enter the 8-digit code sent to <strong className="text-slate-900 dark:text-white">{email}</strong>
-                    </p>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
+                    <Lock className="h-4 w-4" />
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 dark:text-zinc-300 mb-2 text-center">
-                      8-Digit Code
-                    </label>
-                    <div className="flex justify-center gap-1 sm:gap-1.5">
-                      {otp.map((digit, idx) => (
-                        <input
-                          key={idx}
-                          ref={(el) => {
-                            otpInputsRef.current[idx] = el;
-                          }}
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={8}
-                          value={digit}
-                          onChange={(e) => handleOtpChange(idx, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(idx, e)}
-                          className="h-11 w-8 sm:w-9 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 text-center text-lg font-bold text-slate-900 dark:text-white shadow-inner focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
-                        />
-                      ))}
-                    </div>
-                  </div>
-
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter password"
+                    required
+                    minLength={6}
+                    className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-10 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                  />
                   <button
-                    type="submit"
-                    disabled={isLoading || otp.join('').length !== 8}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-violet-600/25 transition-all hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 cursor-pointer"
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 cursor-pointer"
                   >
-                    {isLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <>
-                        <ShieldCheck className="h-4 w-4" />
-                        <span>Verify Code & Continue</span>
-                      </>
-                    )}
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
+                </div>
+              </div>
 
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setSignUpStep('profile')}
-                      className="hover:underline cursor-pointer"
-                    >
-                      Change Details
-                    </button>
-                    {countdown > 0 ? (
-                      <span>Resend in {countdown}s</span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleSignUpStart}
-                        className="text-violet-600 dark:text-violet-400 hover:underline cursor-pointer"
-                      >
-                        Resend Code
-                      </button>
-                    )}
+              <button
+                type="submit"
+                disabled={isLoading || !fullName || !email || !password || !confirmPassword}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B5282A] hover:bg-[#9E1B1D] px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-[#B5282A]/25 transition-all disabled:opacity-50 cursor-pointer mt-2"
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <span>Create Free Account</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* ================================================================= */}
+          {/* TAB 3: FORGOT PASSWORD / RESET PASSWORD MODE */}
+          {/* ================================================================= */}
+          {mode === 'forgot_password' && (
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  Your Account Email
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
+                    <Mail className="h-4 w-4" />
                   </div>
-                </form>
-              )}
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    required
+                    className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                  />
+                </div>
+              </div>
 
-              {/* STEP 3: Create Permanent User ID & Password */}
-              {signUpStep === 'credentials' && (
-                <form onSubmit={handleCreateCredentials} className="space-y-3.5">
-                  <div className="p-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 text-center">
-                    <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                      ✓ Email Verified Successfully!
-                    </p>
-                    <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-0.5">
-                      Now create your permanent User ID and Password:
-                    </p>
+              <button
+                type="submit"
+                disabled={isLoading || !email}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B5282A] hover:bg-[#9E1B1D] px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-[#B5282A]/25 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <span>Send Password Reset Instructions</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('signin');
+                    setError(null);
+                    setSuccessMsg(null);
+                  }}
+                  className="text-xs text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:underline cursor-pointer"
+                >
+                  ← Back to Sign In
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ================================================================= */}
+          {/* TAB 4: UPDATE PASSWORD (Via Recovery Token) */}
+          {/* ================================================================= */}
+          {mode === 'update_password' && (
+            <form onSubmit={handleUpdatePassword} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  New Password
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
+                    <Lock className="h-4 w-4" />
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
-                      User ID / Username
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
-                        <UserIcon className="h-4 w-4" />
-                      </div>
-                      <input
-                        type="text"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
-                        placeholder="prakash_01"
-                        required
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
-                      Create Password (min 6 characters)
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
-                        <Lock className="h-4 w-4" />
-                      </div>
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="••••••••"
-                        required
-                        minLength={6}
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-10 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 cursor-pointer"
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
-                      Confirm Password
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
-                        <Lock className="h-4 w-4" />
-                      </div>
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="••••••••"
-                        required
-                        minLength={6}
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
-                      />
-                    </div>
-                  </div>
-
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    required
+                    minLength={6}
+                    className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-10 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                  />
                   <button
-                    type="submit"
-                    disabled={isLoading || !username || newPassword.length < 6 || newPassword !== confirmPassword}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-violet-600/25 transition-all hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 cursor-pointer"
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 cursor-pointer"
                   >
-                    {isLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <>
-                        <ShieldCheck className="h-4 w-4" />
-                        <span>Save & Complete Registration</span>
-                      </>
-                    )}
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
-                </form>
-              )}
-            </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
+                    <Lock className="h-4 w-4" />
+                  </div>
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter password"
+                    required
+                    minLength={6}
+                    className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-10 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 cursor-pointer"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading || !password || !confirmPassword}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B5282A] hover:bg-[#9E1B1D] px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-[#B5282A]/25 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <ShieldCheck className="h-4 w-4" />
+                    <span>Save New Password</span>
+                  </>
+                )}
+              </button>
+            </form>
           )}
         </div>
       </div>
