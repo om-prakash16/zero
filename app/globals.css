@@ -1,0 +1,222 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+  /* Participant accents - Light mode */
+  --accent-a: #e04434;     /* Crisp coral-crimson for participant A */
+  --accent-b: #0284c7;     /* Clear azure-blue for participant B */
+  --accent-a-subtle: #fef2f2;
+  --accent-b-subtle: #f0f9ff;
+  --accent-a-border: #fecaca;
+  --accent-b-border: #bae6fd;
+  
+  /* Status colors */
+  --status-listening: #16a34a;
+  --status-speaking: #d97706;
+  --status-translating: #7c3aed;
+  --status-playing: #0284c7;
+  --status-interrupted: #dc2626;
+  --status-error: #dc2626;
+
+  /* Surfaces & Borders (Light) */
+  --bg-page: #f8fafc;
+  --bg-card: #ffffff;
+  --border-card: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+}
+
+.dark {
+  /* Participant accents - Dark mode */
+  --accent-a: #f87171;
+  --accent-b: #38bdf8;
+  --accent-a-subtle: rgba(239, 68, 68, 0.12);
+  --accent-b-subtle: rgba(56, 189, 248, 0.12);
+  --accent-a-border: rgba(239, 68, 68, 0.25);
+  --accent-b-border: rgba(56, 189, 248, 0.25);
+
+  /* Status colors */
+  --status-listening: #22c55e;
+  --status-speaking: #f59e0b;
+  --status-translating: #a78bfa;
+  --status-playing: #38bdf8;
+  --status-interrupted: #f87171;
+  --status-error: #f87171;
+
+  /* Surfaces & Borders (Dark) */
+  --bg-page: #09090b;
+  --bg-card: #121215;
+  --border-card: #27272a;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+body {
+  font-family: var(--font-inter), system-ui, sans-serif;
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* Selection */
+::selection {
+  background: rgba(224, 68, 52, 0.18);
+  color: inherit;
+}
+.dark ::selection {
+  background: rgba(248, 113, 113, 0.28);
+  color: #fff;
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+}
+.dark :focus-visible {
+  outline: 2px solid #f8fafc;
+  outline-offset: 2px;
+}
+
+/* Waveform animation */
+@keyframes waveform {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+
+.wave-bar {
+  animation: waveform 0.8s ease-in-out infinite;
+}
+.wave-bar:nth-child(1) { animation-delay: 0s; }
+.wave-bar:nth-child(2) { animation-delay: 0.1s; }
+.wave-bar:nth-child(3) { animation-delay: 0.2s; }
+.wave-bar:nth-child(4) { animation-delay: 0.3s; }
+.wave-bar:nth-child(5) { animation-delay: 0.15s; }
+.wave-bar:nth-child(6) { animation-delay: 0.05s; }
+.wave-bar:nth-child(7) { animation-delay: 0.25s; }
+
+/* Pulse animation for mic button */
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224, 68, 52, 0.4); }
+  50% { box-shadow: 0 0 0 10px rgba(224, 68, 52, 0); }
+}
+
+.mic-pulse {
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+/* Fade in & Slide */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+/* Gradient typography */
+.gradient-text-a {
+  background: linear-gradient(135deg, #e04434, #f97316);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.dark .gradient-text-a {
+  background: linear-gradient(135deg, #f87171, #fb923c);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-b {
+  background: linear-gradient(135deg, #0284c7, #2563eb);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.dark .gradient-text-b {
+  background: linear-gradient(135deg, #38bdf8, #60a5fa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Hero background gradients */
+.hero-gradient {
+  background-color: #f8fafc;
+  background-image:
+    radial-gradient(ellipse at 35% 25%, rgba(224, 68, 52, 0.06) 0%, transparent 55%),
+    radial-gradient(ellipse at 75% 45%, rgba(2, 132, 199, 0.06) 0%, transparent 55%),
+    linear-gradient(to bottom, #ffffff, #f8fafc);
+}
+.dark .hero-gradient {
+  background-color: #09090b;
+  background-image:
+    radial-gradient(ellipse at 30% 40%, rgba(224, 68, 52, 0.12) 0%, transparent 60%),
+    radial-gradient(ellipse at 70% 60%, rgba(56, 189, 248, 0.12) 0%, transparent 60%),
+    none;
+}
+
+/* Clean minimal card */
+.minimal-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+}
+.dark .minimal-card {
+  background-color: #121215;
+  border-color: #27272a;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Subtle grid pattern overlay */
+.grid-pattern {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+}
+.dark .grid-pattern {
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
