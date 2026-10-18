@@ -1,8 +1,8 @@
-# CROSSWIRE — Complete Room Management & Multilingual Messaging Test Report
+# CROSSWIRE — Complete Platform, Messaging & Security Test Report
 
 **Execution Date:** 2026-10-18  
-**Environment:** Next.js 16.4.2 (Turbopack) · React 19.3.0 · Supabase PostgreSQL · Google Gemini AI (2.5-flash / fallback chain)  
-**Overall Status:** **100% PASSED** (All automated tests, live DB concurrency, live translation, type checks, linting, and production build succeeded)
+**Environment:** Next.js 16.4.2 (Turbopack) · React 19.3.0 · Supabase PostgreSQL · Google Gemini AI (Active Models: 2.5-flash, 2.5-flash-lite, flash-latest, 2.5-pro)  
+**Overall Status:** **100% PASSED** (All automated tests, live DB concurrency, live bidirectional translation, type checks, linting, and production build succeeded)
 
 ---
 
@@ -12,94 +12,88 @@
 | :--- | :--- | :--- | :--- |
 | **Linting** | `npm run lint` | **PASS** | 0 errors, 0 warnings across all app, component, and lib files. |
 | **Type Check** | `npx tsc --noEmit` | **PASS** | Strict TypeScript compilation with 0 errors. |
-| **Automated Unit & Integration Tests** | `npm test` (`lib/__tests__/runAllTests.ts`) | **PASS** | 4 suites executed, 84 passing assertions (100% pass rate). |
-| **Production Build** | `npm run build` | **PASS** | Complete Turbopack SSR build, all routes compiled cleanly. |
-| **Live Database Concurrency** | `node scripts/test-real-concurrency-and-capacity.mjs` | **PASS** | Real parallel PostgreSQL connections racing for limited slots. |
-| **Live Bidirectional Messaging** | `node scripts/test-both-side-messaging.mjs` | **PASS** | Live Supabase persistence + Gemini AI live translation for both sides. |
+| **Automated Unit & Integration Tests** | `npm test` (`lib/__tests__/runAllTests.ts`) | **PASS** | 5 test suites executed, all assertions passed (100% pass rate). |
+| **Production Build** | `npm run build` | **PASS** | Turbopack SSR build, all 29 routes compiled cleanly in 2.9s. |
+| **Live Database Concurrency** | `node scripts/test-real-concurrency-and-capacity.mjs` | **PASS** | Parallel PostgreSQL connections racing for limited slots with row-level locks. |
+| **Live Bidirectional Messaging** | `node scripts/test-both-side-messaging.mjs` | **PASS** | Real English ⇄ Hindi communication with live Supabase persistence & Gemini translation. |
 
 ---
 
-## 2. Detailed Test Inventory
+## 2. Test Suite Breakdown
 
-### A. Room Capacity & Ownership Validation
+### Suite 1: Full Audit & Core Messaging (`fullAudit.test.ts`)
+- **MSG-01**: Dual client simulation with distinct sender identities.
+- **MSG-02**: Message deduplication and idempotency verification.
+- **MSG-03**: Realtime broadcast structure and payload validation.
+- **MSG-04**: Bidirectional language pair routing (English ⇄ Hindi).
+- **MSG-05**: Independent audio controls and mute isolation.
+- **MSG-06**: Runtime language switching preserving historical messages.
 
-| Test ID | Category | Description | Expected Result | Actual Result | Status |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `CAP-01` | Unit | Default capacity on creation | Default capacity is 2 | `room.max_capacity === 2` | **PASS** |
-| `CAP-02` | Unit | Allowed capacity range | Allows configured capacities in range [2, 16] | Steps: 2, 3, 4, 6, 8, 12, 16 allowed; <2 or >16 rejected | **PASS** |
-| `CAP-03` | Unit & DB | Host settings update permissions | Only `creator_id` can modify room settings | Non-creator receives "Only the room creator can update room settings" | **PASS** |
-| `CAP-04` | Unit & DB | Occupancy-aware capacity shrink | Cannot reduce capacity below current occupants | Trigger/RPC rejects shrink with error message | **PASS** |
-| `CAP-05` | Unit & DB | Active room capacity expansion | Creator can expand capacity while room is active | Capacity increased from 3 to 5 and persisted | **PASS** |
+### Suite 2: Room Code Generation & Normalization (`roomCode.test.ts`)
+- **CODE-01**: Three-part format `adjective-noun-number` verified.
+- **CODE-02**: Unique code generation entropy (>50% unique per 100).
+- **CODE-03**: Display formatting and whitespace normalization.
+- **CODE-04**: Round-trip normalization idempotency.
 
----
+### Suite 3: Room Capacity & Admission Mode (`roomCapacityAndAdmission.test.ts`)
+- **CAP-01**: Default room capacity is 2; default admission mode is `approval_required`.
+- **CAP-02**: Allowed capacity steps [2, 16] accepted; out-of-range values rejected.
+- **CAP-03**: Host settings update restricted strictly to room creator.
+- **CAP-04**: Capacity cannot be reduced below active occupancy.
+- **ADM-01**: Auto-approve admission admits immediately when slot is free.
+- **ADM-02**: Auto-approve room rejects entry when capacity is full.
+- **ADM-03**: Approval-required room queues request in `join_requests`.
+- **ADM-04**: Host approves/declines join request; requester can cancel.
+- **ADM-05**: Multi-participant target translation deduplication.
 
-### B. Admission Mode & Join Request Lifecycle
+### Suite 4: Edge Cases & Security (`edgeCasesAndSecurity.test.ts`)
+- **SEC-01**: Inactive and closed rooms reject entry.
+- **SEC-02**: Duplicate join requests are prevented and rejected gracefully.
+- **SEC-03**: Existing participants reconnect without consuming additional capacity slots.
+- **SEC-04**: Client A audio settings remain isolated when Client B toggles audio.
+- **SEC-05**: Model fallback chain switches models on quota errors.
 
-| Test ID | Category | Description | Expected Result | Actual Result | Status |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `ADM-01` | Integration | Auto-Approve admission | Caller admitted immediately if capacity available | Admitted directly with participant record created | **PASS** |
-| `ADM-02` | Integration | Auto-Approve full-room rejection | Rejects immediately when room is at capacity | Returns `{ status: 'room_full' }`, no participant created | **PASS** |
-| `ADM-03` | Integration | Host Approval queue | In `approval_required` mode, creates `pending` request | Request persisted in `join_requests` with status `pending` | **PASS** |
-| `ADM-04` | Security | Unauthorized approval attempt | Non-host user cannot approve join requests | Rejection: "Only the room creator can resolve join requests" | **PASS** |
-| `ADM-05` | Integration | Host request approval | Host approves join request | Request marked `approved`, participant record created | **PASS** |
-| `ADM-06` | Integration | Host request decline | Host declines join request | Request marked `declined`, applicant barred from entry | **PASS** |
-| `ADM-07` | Integration | Requester request cancellation | Applicant cancels their own pending request | Request marked `cancelled`, removed from host badge count | **PASS** |
-| `ADM-08` | Security | Duplicate request prevention | Applicant cannot create multiple pending requests | Existing request updated or duplicate rejected safely | **PASS** |
-
----
-
-### C. Real Database Concurrency & Race Condition Tests
-
-| Test ID | Category | Description | Expected Result | Actual Result | Status |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `CONC-01` | Live DB | Simultaneous concurrent joins (5 parallel clients racing for 2 remaining slots) | Exactly 2 admitted, 3 rejected; database row count strictly equals 3 | 5 clients executed parallel queries; row-level lock (`SELECT ... FOR UPDATE`) serialized inserts: exactly 2 succeeded, 3 failed with "Room is full. Maximum 3 participants allowed". | **PASS** |
-| `CONC-02` | Live DB | Atomic room counter synchronization | `rooms.participant_count` stays strictly in sync | Counter updated atomically via trigger upon each insert/delete | **PASS** |
-
----
-
-### D. Multilingual Messaging & Translation Integrity
-
-| Test ID | Category | Description | Expected Result | Actual Result | Status |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `MSG-01` | Integration | Side A -> Side B (English to Hindi) | Preserves original English, translates to Hindi via Gemini, correct labels | Side B screen receives: Original · English ("We need to deploy..."), Translation · Hindi ("हमें आज रात नए अनुवाद अपडेट्स..."), Sender: Alice (Host) | **PASS** |
-| `MSG-02` | Integration | Side B -> Side A (Hindi to English) | Preserves original Hindi, translates to English via Gemini, correct labels | Side A screen receives: Original · Hindi ("बिल्कुल, सभी..."), Translation · English ("Absolutely, all automated..."), Sender: Rajesh (Guest) | **PASS** |
-| `MSG-03` | Unit | Multi-participant language deduplication | When multiple participants share a language, only 1 translation call is made | Deduplicated unique target languages list (e.g. 2 Hindi speakers generate 1 translation) | **PASS** |
-| `MSG-04` | Live DB | Multi-target translation persistence | `message_translations` table stores translations for all recipient languages | Translations stored for Spanish and French; queried and verified | **PASS** |
-| `MSG-05` | Unit | Independent audio preferences | Volume, mute, and autoPlayVoice remain isolated per user | Client A auto-plays incoming translation; Client B is muted and does not play; settings stored independently | **PASS** |
-| `MSG-06` | Unit | Speech interruption isolation | Interrupting speech purges queue and stops synthesizer | Queue cleared, synthesizer cancelled immediately | **PASS** |
-| `MSG-07` | Unit & API | Translation API fallback resilience | Model fallback chain tries secondary models if primary hits quota | Automatically falls back through `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-flash` | **PASS** |
+### Suite 5: Super Admin Platform Control (`superadminPlatformControl.test.ts`)
+- **ADMIN-01**: Active superadmin granted access; suspended/banned superadmins denied.
+- **ADMIN-02**: Unauthorized role escalation and metadata spoofing blocked.
+- **ADMIN-03**: Sole active superadmin protected against accidental demotion/suspension.
+- **ADMIN-04**: User suspension immediately revokes room creation/entry rights.
+- **ADMIN-05**: Superadmin room termination disconnects all participants.
+- **ADMIN-06**: Multilingual registry coverage: Scheduled Indian languages verified.
+- **ADMIN-07**: Superadmin language disable/enable toggling.
+- **ADMIN-08**: Administrative audit logs are immutable.
 
 ---
 
-### E. Edge Cases & Recovery
+## 3. End-to-End Live Integration Verification
 
-| Test ID | Category | Description | Expected Result | Actual Result | Status |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `EDGE-01` | Unit | Closed or inactive rooms | Inactive rooms reject join requests | Returns `{ canJoin: false, reason: 'Room is closed/inactive' }` | **PASS** |
-| `EDGE-02` | Unit | Reconnecting participants | Existing participant re-entering doesn't consume extra capacity | Returns `already_joined` with existing `participant_id` | **PASS** |
-| `EDGE-03` | Unit | Runtime language switching | Historical message translations preserved after participant switches language | Earlier messages keep original target translations; subsequent messages target new language | **PASS** |
+### Two-Way Conversation Verification (`scripts/test-both-side-messaging.mjs`)
+```
+1. User 1 (Alice - English Speaker) Authenticated: c615c5f7-ac8f-4be7-a04b-686635a0b2f8
+2. User 2 (Rajesh - Hindi Speaker) Authenticated: cd400b79-223e-4688-94aa-eef7e7c1f3e4
+3. Room created: [bidi-test-313], Max Capacity: 2
+4. Alice Joined: "Alice (Host)" [English]
+5. Rajesh Joined: "Rajesh (Guest)" [Hindi] - Room Occupancy: 2 / 2
+
+SIDE A -> SIDE B:
+  Alice: "We need to deploy the new translation updates to production tonight."
+  Gemini [Hindi]: "हमें आज रात नए अनुवाद अपडेट्स को प्रोडक्शन पर डिप्लॉय करना होगा।"
+  ✓ Rajesh Screen: Original English + Translated Hindi displayed correctly.
+
+SIDE B -> SIDE A:
+  Rajesh: "बिल्कुल, सभी स्वचालित परीक्षण पूरे हो चुके हैं और हम तैयार हैं।"
+  Gemini [English]: "Absolutely, all automated tests have been completed and we are ready."
+  ✓ Alice Screen: Original Hindi + Translated English displayed correctly.
+
+Clean up test room data... Done.
+Result: 100% SUCCESS
+```
 
 ---
 
-## 3. Manual Verification Checklist
+## 4. UI & Interaction Improvements Summary
 
-1. **Host Room Creation**:
-   - Navigate to `/`.
-   - Click **Create Room**.
-   - Verify Capacity Stepper (default is 2, options: 2, 3, 4, 6, 8, 12, 16).
-   - Verify Admission Mode toggle (**Require Host Approval** vs. **Auto-Approve**).
-   - Enter room; confirm header displays `1 / [max] Participants` and Host Settings icon is visible.
-
-2. **Joining with Host Approval**:
-   - Open room URL in an Incognito window or second device.
-   - Enter guest name and choose language (e.g., Hindi).
-   - Verify guest sees "Waiting for Host Approval" screen with live spinner.
-   - On Host window, verify pending request badge count increases and toast notification appears.
-   - Click Host Requests modal -> Click **Approve**.
-   - Guest is immediately admitted into the room via Realtime.
-
-3. **Bidirectional Messaging & Voice**:
-   - Host sends an English message -> Guest sees original English + Hindi translation.
-   - Guest sends a Hindi message -> Host sees original Hindi + English translation.
-   - Click speaker icon on translated bubble to hear native audio speech synthesis.
-   - Verify auto-play toggle operates independently without affecting other participants.
+1. **Leave Room & End Chat**: Added intuitive header controls with confirmation modals for both hosts and participants. Realtime room updates ensure guests receive immediate notification when a room is closed.
+2. **Limit Over Error Handling**: Upstream rate limits or model failures display a clean `"Limit over"` message instead of leaking raw JSON traces.
+3. **Dynamic Language Registry Count**: Homepage pill dynamically renders `{SUPPORTED_LANGUAGES.length}+ Languages` (102+ languages).
+4. **Default Audio Muting**: Entering any room defaults `isMuted` to `true`, preventing unexpected audio playback.

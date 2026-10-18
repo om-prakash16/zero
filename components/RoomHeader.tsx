@@ -23,6 +23,8 @@ import {
   Minus,
   Plus,
   Loader2,
+  PhoneOff,
+  LogOut,
 } from 'lucide-react';
 import type { Room, Participant, ConversationStatus, JoinRequest, AdmissionMode } from '@/lib/types';
 import { formatRoomCode } from '@/lib/roomCode';
@@ -46,6 +48,8 @@ type Props = {
   isMuted: boolean;
   onToggleMute: () => void;
   onLanguageChange: (newLanguageCode: string) => Promise<void>;
+  onLeaveRoom?: () => Promise<void>;
+  onEndRoom?: () => Promise<void>;
 };
 
 const STATUS_LABELS: Record<
@@ -117,14 +121,18 @@ export function RoomHeader({
   isMuted,
   onToggleMute,
   onLanguageChange,
+  onLeaveRoom,
+  onEndRoom,
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [isSwitchingLang, setIsSwitchingLang] = useState(false);
 
-  // Creator Modals State
+  // Creator & Exit Modals State
   const [isRequestsModalOpen, setIsRequestsModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isParticipantsDropdownOpen, setIsParticipantsDropdownOpen] = useState(false);
+  const [isExitModalOpen, setIsExitModalOpen] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
 
   // Settings form state
   const [capacityInput, setCapacityInput] = useState(room.max_capacity ?? 2);
@@ -212,6 +220,28 @@ export function RoomHeader({
       await onApproveRequest(id);
     } finally {
       setResolvingRequestId(null);
+    }
+  };
+
+  const handleConfirmLeave = async () => {
+    if (!onLeaveRoom) return;
+    try {
+      setIsLeaving(true);
+      await onLeaveRoom();
+    } finally {
+      setIsLeaving(false);
+      setIsExitModalOpen(false);
+    }
+  };
+
+  const handleConfirmEndRoom = async () => {
+    if (!onEndRoom) return;
+    try {
+      setIsLeaving(true);
+      await onEndRoom();
+    } finally {
+      setIsLeaving(false);
+      setIsExitModalOpen(false);
     }
   };
 
@@ -455,6 +485,17 @@ export function RoomHeader({
             ) : (
               <Copy className="w-3 h-3 text-slate-400 dark:text-zinc-500" />
             )}
+          </button>
+
+          {/* Leave / End Chat Button */}
+          <button
+            type="button"
+            onClick={() => setIsExitModalOpen(true)}
+            title={isHost ? 'End conversation or leave room' : 'Leave room'}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors border-rose-200 hover:border-rose-300 dark:border-rose-900/60 bg-rose-50 hover:bg-rose-100/80 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 cursor-pointer"
+          >
+            <PhoneOff className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{isHost ? 'End Chat' : 'Leave'}</span>
           </button>
 
           <ThemeToggle />
@@ -716,6 +757,76 @@ export function RoomHeader({
                 </button>
               </div>
             </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ─── EXIT / END ROOM MODAL ─── */}
+      {isExitModalOpen && typeof window !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+          onClick={() => !isLeaving && setIsExitModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-zinc-800 p-6 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <PhoneOff className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  {isHost ? 'End Conversation' : 'Leave Room'}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-zinc-400">
+                  {isHost
+                    ? 'You are the host. Would you like to end the session for everyone or leave?'
+                    : 'Are you sure you want to exit this conversation?'}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              {isHost && onEndRoom && (
+                <button
+                  type="button"
+                  onClick={handleConfirmEndRoom}
+                  disabled={isLeaving}
+                  className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isLeaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <PhoneOff className="w-4 h-4" />}
+                  <span>End Chat for Everyone</span>
+                </button>
+              )}
+
+              {onLeaveRoom && (
+                <button
+                  type="button"
+                  onClick={handleConfirmLeave}
+                  disabled={isLeaving}
+                  className={`w-full py-2.5 px-4 rounded-xl font-medium text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
+                    isHost
+                      ? 'border border-slate-200 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300'
+                      : 'bg-rose-600 hover:bg-rose-700 text-white'
+                  }`}
+                >
+                  {isLeaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+                  <span>{isHost ? 'Leave Without Ending' : 'Leave Room'}</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsExitModalOpen(false)}
+                disabled={isLeaving}
+                className="w-full py-2 px-4 rounded-xl text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 text-xs font-medium transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>,
         document.body

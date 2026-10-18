@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
       );
 
       let translatedText = '';
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.8-flash'];
+      const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.5-pro'];
       let lastErr: unknown = null;
 
       for (const modelName of candidateModels) {
@@ -161,12 +161,8 @@ export async function POST(request: NextRequest) {
           if (translatedText) break;
         } catch (attemptErr: unknown) {
           lastErr = attemptErr;
-          const msg = attemptErr instanceof Error ? attemptErr.message : '';
-          const isQuotaOrDown = msg.includes('429') || msg.includes('quota') || msg.includes('503') || msg.includes('demand');
-          if (isQuotaOrDown) {
-            continue; // try next candidate model
-          }
-          throw attemptErr;
+          // Continue to next candidate model on any failure (404, 429, 503, quota, etc.)
+          continue;
         }
       }
 
@@ -192,20 +188,10 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     console.error('Gemini translation error:', error);
 
-    const errorMessage =
-      error instanceof Error ? error.message : 'Translation failed';
-
-    // Detect rate limit errors
-    if (errorMessage.includes('429') || errorMessage.includes('quota')) {
-      return NextResponse.json(
-        { success: false, error: 'Translation rate limit reached. Please wait a moment.' },
-        { status: 429 }
-      );
-    }
-
+    // Return clean user-facing error message as requested
     return NextResponse.json(
-      { success: false, error: `Translation failed: ${errorMessage}` },
-      { status: 500 }
+      { success: false, error: 'Limit over' },
+      { status: 429 }
     );
   }
 }

@@ -46,7 +46,7 @@ STRICT RULES:
 Text to translate:
 ${text}`;
 
-  const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.8-flash'];
+  const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.5-pro'];
   for (const model of candidateModels) {
     try {
       const res = await ai.models.generateContent({
@@ -58,12 +58,8 @@ ${text}`;
         },
       });
       return res.text?.trim() || '';
-    } catch (err) {
-      const msg = err?.message || '';
-      if (msg.includes('429') || msg.includes('quota') || msg.includes('503')) {
-        continue;
-      }
-      throw err;
+    } catch {
+      continue;
     }
   }
 }

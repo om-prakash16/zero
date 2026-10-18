@@ -23,7 +23,8 @@ import { SpeakingPanel } from '@/components/SpeakingPanel';
 import { RoomHeader } from '@/components/RoomHeader';
 import { v4 as uuidv4 } from 'uuid';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { Globe } from 'lucide-react';
+import { Globe, PhoneOff } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 type Props = {
   room: Room;
@@ -40,8 +41,11 @@ export function ConversationRoom({
   initialMessages,
   userId,
 }: Props) {
+  const router = useRouter();
+
   // Room State
   const [room, setRoom] = useState<Room>(initialRoom);
+  const [isRoomEndedByHost, setIsRoomEndedByHost] = useState(false);
 
   // Participant State
   const [currentParticipant, setCurrentParticipant] = useState<Participant>(
@@ -509,6 +513,22 @@ export function ConversationRoom({
           }
         }
       )
+      // Rooms table: Host ended room or room closed
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'rooms',
+          filter: `id=eq.${room.id}`,
+        },
+        (payload) => {
+          const updated = payload.new as Room;
+          if (updated && !updated.is_active) {
+            setIsRoomEndedByHost(true);
+          }
+        }
+      )
       .subscribe((subStatus) => {
         if (!isMountedRef.current) return;
         if (subStatus === 'SUBSCRIBED') {
@@ -627,6 +647,28 @@ export function ConversationRoom({
     },
     [room.id, showNotification]
   );
+
+  // ─── Exit & End Room Handlers ─────────────────────────────────────────────
+  const handleLeaveRoom = useCallback(async () => {
+    try {
+      await supabase.from('participants').delete().eq('id', currentParticipant.id);
+    } catch (err) {
+      console.error('Error leaving room:', err);
+    } finally {
+      router.push('/');
+    }
+  }, [currentParticipant.id, router]);
+
+  const handleEndRoom = useCallback(async () => {
+    try {
+      await supabase.from('rooms').update({ is_active: false }).eq('id', room.id);
+      await supabase.from('participants').delete().eq('id', currentParticipant.id);
+    } catch (err) {
+      console.error('Error ending room:', err);
+    } finally {
+      router.push('/');
+    }
+  }, [room.id, currentParticipant.id, router]);
 
   // ─── Send Message (Multi-Participant Multilingual Translation) ────────────
   const sendMessage = useCallback(
@@ -761,8 +803,8 @@ export function ConversationRoom({
           );
           setStatus('idle');
         }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : 'Translation failed';
+      } catch {
+        const errMsg = 'Limit over';
 
         try {
           await supabase
@@ -845,8 +887,8 @@ export function ConversationRoom({
           );
           setStatus('idle');
         }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : 'Retry translation failed';
+      } catch {
+        const errMsg = 'Limit over';
         if (isMountedRef.current) {
           setTranslationError(errMsg);
           setMessages((prev) =>
@@ -1010,6 +1052,8 @@ export function ConversationRoom({
         isMuted={isMuted}
         onToggleMute={handleToggleMute}
         onLanguageChange={handleLanguageChange}
+        onLeaveRoom={handleLeaveRoom}
+        onEndRoom={handleEndRoom}
       />
 
       {/* Floating System Notification */}
@@ -1082,6 +1126,30 @@ export function ConversationRoom({
         speechSupported={isSpeechRecognitionSupported()}
         synthSupported={isSpeechSynthesisSupported()}
       />
+
+      {/* Host Terminated / Room Closed Modal */}
+      {isRoomEndedByHost && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-zinc-800 p-6 text-center animate-in fade-in zoom-in-95">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto mb-4">
+              <PhoneOff className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1">
+              Conversation Ended
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 mb-6 leading-relaxed">
+              The room host has closed this conversation session. Thank you for participating!
+            </p>
+            <button
+              onClick={() => router.push('/')}
+              type="button"
+              className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs transition-colors shadow-xs cursor-pointer"
+            >
+              Return to Home
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

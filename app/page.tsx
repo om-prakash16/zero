@@ -103,7 +103,7 @@ export default function HomePage() {
           <Radio className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
           <span>Multilingual Live Argument Protocol</span>
           <span className="text-slate-300 dark:text-zinc-700">•</span>
-          <span className="text-slate-500 dark:text-zinc-500">12 Languages</span>
+          <span className="text-slate-500 dark:text-zinc-500">{SUPPORTED_LANGUAGES.length}+ Languages</span>
         </div>
 
         {/* Headline */}
