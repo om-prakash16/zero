@@ -12,68 +12,29 @@ import {
   Flame,
   Radio,
   CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { generateRoomCode, normalizeRoomCode } from '@/lib/roomCode';
+import { normalizeRoomCode } from '@/lib/roomCode';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
+import { CreateRoomModal } from '@/components/CreateRoomModal';
 import { SUPPORTED_LANGUAGES } from '@/lib/types';
 
 export default function HomePage() {
   const router = useRouter();
   const [joinCode, setJoinCode] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [error, setError] = useState('');
-
-  async function handleCreateRoom() {
-    setIsCreating(true);
-    setError('');
-
-    try {
-      // Sign in anonymously if not already signed in
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        const { error: signInError } = await supabase.auth.signInAnonymously();
-        if (signInError) throw signInError;
-      }
-
-      // Generate unique room code
-      let code = generateRoomCode();
-      let attempts = 0;
-      while (attempts < 5) {
-        const { data: existing } = await supabase
-          .from('rooms')
-          .select('id')
-          .eq('code', code)
-          .single();
-
-        if (!existing) break;
-        code = generateRoomCode();
-        attempts++;
-      }
-
-      // Create the room
-      const { data: room, error: roomError } = await supabase
-        .from('rooms')
-        .insert({ code })
-        .select()
-        .single();
-
-      if (roomError) throw roomError;
-
-      router.push(`/room/${room.code}`);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to create room';
-      setError(message);
-      setIsCreating(false);
-    }
-  }
 
   async function handleJoinRoom(e: React.FormEvent) {
     e.preventDefault();
     const code = normalizeRoomCode(joinCode);
-    if (!code) return;
+    if (!code) {
+      setError('Please enter a valid room code or invitation link');
+      return;
+    }
 
     setIsJoining(true);
     setError('');
@@ -92,21 +53,25 @@ export default function HomePage() {
         .select('*')
         .eq('code', code)
         .eq('is_active', true)
-        .single();
+        .maybeSingle();
 
       if (roomError || !room) {
-        setError('Room not found. Check the code and try again.');
+        setError(`Room "${code}" was not found. Please verify the code or invitation link.`);
         setIsJoining(false);
         return;
       }
 
-      // Check room is not full
-      const { count } = await supabase
+      // Check room capacity
+      const { data: participants } = await supabase
         .from('participants')
-        .select('*', { count: 'exact', head: true })
+        .select('user_id')
         .eq('room_id', room.id);
 
-      if (count !== null && count >= 2) {
+      const { data: currentSession } = await supabase.auth.getSession();
+      const currentUid = currentSession.session?.user?.id;
+      const isAlreadyMember = participants?.some((p) => p.user_id === currentUid);
+
+      if (!isAlreadyMember && (participants?.length ?? 0) >= 2) {
         setError('Room is full. Maximum 2 participants allowed.');
         setIsJoining(false);
         return;
@@ -129,7 +94,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen hero-gradient grid-pattern relative flex flex-col justify-between">
       {/* Professional Responsive Navbar */}
-      <Navbar onStartArgument={handleCreateRoom} onJoinRoom={scrollToJoin} />
+      <Navbar onStartArgument={() => setIsCreateModalOpen(true)} onJoinRoom={scrollToJoin} />
 
       {/* Hero Content */}
       <main className="flex-1 max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-16 flex flex-col items-center text-center">
@@ -183,23 +148,13 @@ export default function HomePage() {
                 </span>
               </div>
               <button
-                onClick={handleCreateRoom}
-                disabled={isCreating}
+                onClick={() => setIsCreateModalOpen(true)}
                 type="button"
-                className="w-full h-12 flex items-center justify-center gap-2.5 px-6 rounded-xl font-medium text-sm text-white bg-rose-600 hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-500 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-xs active:scale-[0.99] cursor-pointer"
+                className="w-full h-12 flex items-center justify-center gap-2.5 px-6 rounded-xl font-medium text-sm text-white bg-rose-600 hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-500 transition-all shadow-xs active:scale-[0.99] cursor-pointer"
               >
-                {isCreating ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Allocating Room...</span>
-                  </>
-                ) : (
-                  <>
-                    <Mic className="w-4 h-4" />
-                    <span>Start an Argument</span>
-                    <ArrowRight className="w-4 h-4 ml-0.5" />
-                  </>
-                )}
+                <Mic className="w-4 h-4" />
+                <span>Create Room (Start an Argument)</span>
+                <ArrowRight className="w-4 h-4 ml-0.5" />
               </button>
             </div>
 
@@ -216,7 +171,7 @@ export default function HomePage() {
                 htmlFor="join-room-input"
                 className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400 mb-2"
               >
-                Option 2 · Join Existing Room
+                Option 2 · Join with Code or Link
               </label>
               <form onSubmit={handleJoinRoom} className="flex gap-2.5">
                 <div className="relative flex-1">
@@ -225,18 +180,28 @@ export default function HomePage() {
                     id="join-room-input"
                     type="text"
                     value={joinCode}
-                    onChange={(e) => setJoinCode(e.target.value)}
-                    placeholder="Enter room code (e.g. fire-lion-61)"
-                    maxLength={30}
-                    className="w-full h-11 pl-10 pr-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-sm font-mono focus:bg-white dark:focus:bg-zinc-900 focus:border-slate-800 dark:focus:border-zinc-600 outline-hidden transition-colors"
+                    onChange={(e) => {
+                      setJoinCode(e.target.value);
+                      if (error) setError('');
+                    }}
+                    placeholder="Enter code or paste link (e.g. fire-lion-61)"
+                    maxLength={120}
+                    className="w-full h-11 pl-10 pr-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-xs sm:text-sm font-mono focus:bg-white dark:focus:bg-zinc-900 focus:border-slate-800 dark:focus:border-zinc-600 outline-hidden transition-colors"
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={isJoining || !joinCode.trim()}
-                  className="h-11 px-5 rounded-xl font-medium text-sm bg-slate-900 hover:bg-slate-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shadow-xs cursor-pointer"
+                  className="h-11 px-5 rounded-xl font-medium text-sm bg-slate-900 hover:bg-slate-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  {isJoining ? 'Connecting...' : 'Join Room'}
+                  {isJoining ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Joining...</span>
+                    </>
+                  ) : (
+                    <span>Join Room</span>
+                  )}
                 </button>
               </form>
               {error && (
@@ -374,6 +339,12 @@ export default function HomePage() {
 
       {/* Professional Responsive Footer */}
       <Footer />
+
+      {/* Create Room Modal */}
+      <CreateRoomModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+      />
     </div>
   );
 }

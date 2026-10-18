@@ -1,4 +1,10 @@
-import { generateRoomCode, formatRoomCode, normalizeRoomCode } from '../roomCode';
+import {
+  generateRoomCode,
+  formatRoomCode,
+  normalizeRoomCode,
+  isValidRoomCode,
+  getRoomInviteUrl,
+} from '../roomCode';
 import { SUPPORTED_LANGUAGES, getLanguageByCode } from '../types';
 
 function assert(condition: boolean, message: string): void {
@@ -24,6 +30,19 @@ assert(normalizeRoomCode('brave   wolf   42') === 'brave-wolf-42', 'Multiple whi
 assert(normalizeRoomCode('  brave-wolf-42  ') === 'brave-wolf-42', 'Leading and trailing spaces trimmed');
 assert(normalizeRoomCode('---brave---wolf---42---') === 'brave-wolf-42', 'Multiple leading/trailing/internal dashes normalized');
 assert(normalizeRoomCode('BRAVE • WOLF • 42') === 'brave-wolf-42', 'Alternative bullet symbols normalized');
+
+// Test URL extraction
+assert(normalizeRoomCode('http://localhost:3000/room/brave-wolf-42') === 'brave-wolf-42', 'Extracts room code from local URL');
+assert(normalizeRoomCode('https://crosswire.app/room/fierce-hawk-99?ref=invite#top') === 'fierce-hawk-99', 'Extracts room code from production URL with query and hash');
+
+// Test validation
+assert(isValidRoomCode('brave-wolf-42'), 'Standard room code is valid');
+assert(isValidRoomCode('http://localhost:3000/room/brave-wolf-42'), 'Room URL parses as valid code');
+assert(!isValidRoomCode('invalid'), 'Non-conforming string is rejected');
+assert(!isValidRoomCode('fake-room-too-long-99'), 'Multi-part string is rejected');
+
+// Test invite URL generation
+assert(getRoomInviteUrl('brave-wolf-42', 'http://localhost:3000') === 'http://localhost:3000/room/brave-wolf-42', 'getRoomInviteUrl generates correct shareable URL');
 
 // Test round trip
 const sampleCode = 'fierce-hawk-99';

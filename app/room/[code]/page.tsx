@@ -56,33 +56,24 @@ function RoomPageInner() {
 
         setRoom(roomData as Room);
 
-        // Check if user is already a participant
-        const { data: existingParticipant } = await supabase
+        // Check all existing participants in this room
+        const { data: participantsList } = await supabase
           .from('participants')
           .select('*')
-          .eq('room_id', roomData.id)
-          .eq('user_id', uid)
-          .single();
+          .eq('room_id', roomData.id);
 
-        if (existingParticipant) {
+        const myParticipant = participantsList?.find((p) => p.user_id === uid);
+        const hostOrOther = participantsList?.find((p) => p.user_id !== uid);
+
+        if (myParticipant) {
           // Reconnecting: update connection status
           await supabase
             .from('participants')
             .update({ is_connected: true, last_seen_at: new Date().toISOString() })
-            .eq('id', existingParticipant.id);
+            .eq('id', myParticipant.id);
 
-          setCurrentParticipant(existingParticipant as Participant);
-
-          // Load other participant
-          const { data: others } = await supabase
-            .from('participants')
-            .select('*')
-            .eq('room_id', roomData.id)
-            .neq('user_id', uid);
-
-          if (others && others.length > 0) {
-            setOtherParticipant(others[0] as Participant);
-          }
+          setCurrentParticipant(myParticipant as Participant);
+          setOtherParticipant((hostOrOther ?? null) as Participant | null);
 
           // Load messages
           const { data: msgs } = await supabase
@@ -93,9 +84,10 @@ function RoomPageInner() {
 
           setMessages((msgs ?? []) as Message[]);
           setRoomState('conversation');
-        } else if (roomData.participant_count >= 2) {
+        } else if ((participantsList?.length ?? 0) >= 2 || roomData.participant_count >= 2) {
           setRoomState('full');
         } else {
+          setOtherParticipant((hostOrOther ?? null) as Participant | null);
           setRoomState('join');
         }
       } catch (err: unknown) {
@@ -129,9 +121,27 @@ function RoomPageInner() {
           .single();
 
         if (error) {
-          if (error.message.includes('full') || error.message.includes('Maximum')) {
+          if (
+            error.message.includes('full') ||
+            error.message.includes('Maximum') ||
+            error.message.includes('capacity')
+          ) {
             setRoomState('full');
             return;
+          }
+          if (error.code === '23505') {
+            // Already a member
+            const { data: existing } = await supabase
+              .from('participants')
+              .select('*')
+              .eq('room_id', room.id)
+              .eq('user_id', userId)
+              .single();
+            if (existing) {
+              setCurrentParticipant(existing as Participant);
+              setRoomState('conversation');
+              return;
+            }
           }
           throw error;
         }
@@ -252,6 +262,7 @@ function RoomPageInner() {
     return (
       <JoinRoomModal
         room={room}
+        host={otherParticipant}
         onJoin={handleJoinRoom}
         error={errorMessage}
       />

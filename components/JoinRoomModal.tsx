@@ -1,28 +1,45 @@
 'use client';
 
-import { useState } from 'react';
-import { Zap, Globe, Shield, ArrowRight, User } from 'lucide-react';
-import type { Room } from '@/lib/types';
-import { SUPPORTED_LANGUAGES } from '@/lib/types';
+import { useState, useEffect } from 'react';
+import { Zap, Globe, Shield, ArrowRight, User, Loader2, Users } from 'lucide-react';
+import type { Room, Participant } from '@/lib/types';
+import { SUPPORTED_LANGUAGES, getLanguageByCode } from '@/lib/types';
 import { formatRoomCode } from '@/lib/roomCode';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { supabase } from '@/lib/supabase';
 
 type Props = {
   room: Room;
+  host?: Participant | null;
   onJoin: (displayName: string, languageCode: string, languageName: string) => Promise<void>;
   error?: string;
 };
 
-export function JoinRoomModal({ room, onJoin, error }: Props) {
+export function JoinRoomModal({ room, host, onJoin, error }: Props) {
   const [displayName, setDisplayName] = useState('');
-  const [languageCode, setLanguageCode] = useState('en');
+  // Default to a language different from host if known
+  const defaultLangCode = host?.language_code === 'en' ? 'hi' : 'en';
+  const [languageCode, setLanguageCode] = useState(defaultLangCode);
   const [isJoining, setIsJoining] = useState(false);
+
+  // Prefill authenticated user's name if logged in
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user && !user.is_anonymous) {
+        const name =
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.email?.split('@')[0];
+        if (name) setDisplayName(name);
+      }
+    });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!displayName.trim() || isJoining) return;
 
-    const lang = SUPPORTED_LANGUAGES.find((l) => l.code === languageCode)!;
+    const lang = getLanguageByCode(languageCode);
     setIsJoining(true);
     await onJoin(displayName.trim(), languageCode, lang.name);
     setIsJoining(false);
@@ -63,9 +80,24 @@ export function JoinRoomModal({ room, onJoin, error }: Props) {
           <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white mb-1.5">
             Join the Argument
           </h1>
-          <p className="text-xs sm:text-sm text-slate-600 dark:text-zinc-400 mb-6 leading-relaxed">
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-zinc-400 mb-5 leading-relaxed">
             Enter your name and pick your native language. You will speak and type in your tongue; your partner hears and reads in theirs.
           </p>
+
+          {/* Host indicator if already in room */}
+          {host && (
+            <div className="mb-5 p-3 rounded-xl bg-violet-500/10 border border-violet-500/20 text-xs flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                <span className="text-slate-700 dark:text-zinc-300">
+                  Host: <strong className="text-slate-900 dark:text-white">{host.display_name}</strong>
+                </span>
+              </div>
+              <span className="font-semibold uppercase text-[10px] px-2 py-0.5 rounded-md bg-violet-500/20 text-violet-700 dark:text-violet-300">
+                {host.language_name} ({host.language_code})
+              </span>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Display Name */}
@@ -103,7 +135,7 @@ export function JoinRoomModal({ room, onJoin, error }: Props) {
                 >
                   {SUPPORTED_LANGUAGES.map((lang) => (
                     <option key={lang.code} value={lang.code} className="bg-white dark:bg-zinc-900 text-slate-900 dark:text-white">
-                      {lang.name} — {lang.nativeName}
+                      {lang.name} — {lang.nativeName} ({lang.code})
                     </option>
                   ))}
                 </select>
@@ -124,11 +156,11 @@ export function JoinRoomModal({ room, onJoin, error }: Props) {
             <button
               type="submit"
               disabled={!displayName.trim() || isJoining}
-              className="w-full h-12 mt-2 flex items-center justify-center gap-2 rounded-xl font-medium text-sm text-white bg-rose-600 hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-xs active:scale-[0.99]"
+              className="w-full h-12 mt-2 flex items-center justify-center gap-2 rounded-xl font-medium text-sm text-white bg-rose-600 hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-xs active:scale-[0.99] cursor-pointer"
             >
               {isJoining ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   <span>Entering Session...</span>
                 </>
               ) : (
