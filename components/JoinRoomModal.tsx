@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Zap, Globe, Shield, ArrowRight, User, Loader2, Users } from 'lucide-react';
+import { Zap, Shield, ArrowRight, User, Loader2, Users } from 'lucide-react';
 import type { Room, Participant } from '@/lib/types';
-import { SUPPORTED_LANGUAGES, getLanguageByCode } from '@/lib/types';
+import { getLanguageByCode } from '@/lib/types';
+import { LanguageSelector } from '@/components/LanguageSelector';
 import { formatRoomCode } from '@/lib/roomCode';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { supabase } from '@/lib/supabase';
@@ -84,20 +85,31 @@ export function JoinRoomModal({ room, host, onJoin, error }: Props) {
             Enter your name and pick your native language. You will speak and type in your tongue; your partner hears and reads in theirs.
           </p>
 
-          {/* Host indicator if already in room */}
-          {host && (
-            <div className="mb-5 p-3 rounded-xl bg-violet-500/10 border border-violet-500/20 text-xs flex items-center justify-between">
+          {/* Host & Room Status indicator */}
+          <div className="mb-5 p-3 rounded-xl bg-violet-500/10 border border-violet-500/20 text-xs flex flex-col gap-2">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Users className="w-4 h-4 text-violet-600 dark:text-violet-400" />
                 <span className="text-slate-700 dark:text-zinc-300">
-                  Host: <strong className="text-slate-900 dark:text-white">{host.display_name}</strong>
+                  {host ? (
+                    <>Host: <strong className="text-slate-900 dark:text-white">{host.display_name}</strong></>
+                  ) : (
+                    <>Room Session</>
+                  )}
                 </span>
               </div>
               <span className="font-semibold uppercase text-[10px] px-2 py-0.5 rounded-md bg-violet-500/20 text-violet-700 dark:text-violet-300">
-                {host.language_name} ({host.language_code})
+                {room.participant_count} / {room.max_capacity} Admitted
               </span>
             </div>
-          )}
+
+            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400 pt-1 border-t border-violet-500/10">
+              <span>Admission:</span>
+              <span className="font-medium text-slate-700 dark:text-zinc-300">
+                {room.admission_mode === 'approval_required' ? 'Host Approval Required' : 'Instant Auto-Admission'}
+              </span>
+            </div>
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Display Name */}
@@ -122,27 +134,14 @@ export function JoinRoomModal({ room, host, onJoin, error }: Props) {
 
             {/* Language Selection */}
             <div>
-              <label htmlFor="language-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-zinc-300 mb-1.5">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-zinc-300 mb-1.5">
                 Your Native Language
               </label>
-              <div className="relative">
-                <Globe className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-zinc-500 pointer-events-none" />
-                <select
-                  id="language-select"
-                  value={languageCode}
-                  onChange={(e) => setLanguageCode(e.target.value)}
-                  className="w-full h-11 pl-10 pr-8 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-white text-sm focus:bg-white dark:focus:bg-zinc-900 focus:border-slate-800 dark:focus:border-zinc-600 outline-none transition-colors cursor-pointer appearance-none"
-                >
-                  {SUPPORTED_LANGUAGES.map((lang) => (
-                    <option key={lang.code} value={lang.code} className="bg-white dark:bg-zinc-900 text-slate-900 dark:text-white">
-                      {lang.name} — {lang.nativeName} ({lang.code})
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
-                  ▼
-                </div>
-              </div>
+              <LanguageSelector
+                selectedCode={languageCode}
+                onSelect={(code) => setLanguageCode(code)}
+                variant="full"
+              />
             </div>
 
             {/* Error Message */}
@@ -161,11 +160,17 @@ export function JoinRoomModal({ room, host, onJoin, error }: Props) {
               {isJoining ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Entering Session...</span>
+                  <span>Submitting Admission...</span>
+                </>
+              ) : room.admission_mode === 'approval_required' ? (
+                <>
+                  <Shield className="w-4 h-4" />
+                  <span>Request to Join Room</span>
+                  <ArrowRight className="w-4 h-4" />
                 </>
               ) : (
                 <>
-                  <span>Enter the Room</span>
+                  <span>Join Room Now</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -176,7 +181,11 @@ export function JoinRoomModal({ room, host, onJoin, error }: Props) {
         {/* Privacy Note */}
         <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400 dark:text-zinc-500 mt-4 text-center">
           <Shield className="w-3.5 h-3.5" />
-          <span>Peer-to-peer room strictly limited to 2 participants.</span>
+          <span>
+            {room.admission_mode === 'approval_required'
+              ? 'Requests are reviewed in real-time by the room creator.'
+              : `Automatic entry enabled (${room.participant_count} / ${room.max_capacity} participants).`}
+          </span>
         </div>
       </div>
 

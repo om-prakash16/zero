@@ -51,7 +51,7 @@ assert(normalizeRoomCode(formatRoomCode(sampleCode)) === sampleCode, 'Format and
 
 console.log('\n=== 2. Language & Locale Mapping Tests ===');
 
-assert(SUPPORTED_LANGUAGES.length === 12, '12 languages supported as required by product spec');
+assert(SUPPORTED_LANGUAGES.length >= 12, 'At least 12 core languages supported in multilingual registry');
 const requiredLanguages = ['en', 'hi', 'es', 'fr', 'de', 'pt', 'ja', 'ar', 'zh', 'ko', 'it', 'ru'];
 for (const code of requiredLanguages) {
   const lang = getLanguageByCode(code);

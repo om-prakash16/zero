@@ -31,19 +31,23 @@ export function MessageList({
         const isMe = msg.sender_id === userId;
         const isPlaying = currentlyPlayingId === msg.id;
 
-        // Resolve languages reliably from message metadata (preserving historical fidelity)
+        // Multi-participant translation resolution:
+        // If msg.translations exists, resolve the translation specifically intended for my language!
+        const myTranslation = msg.translations?.[currentParticipant.language_code];
+        const effectiveTranslatedText = myTranslation?.translated_text ?? msg.translated_text;
+        const effectiveTargetLangCode = myTranslation
+          ? currentParticipant.language_code
+          : (msg.target_language || currentParticipant.language_code);
+        const effectiveStatus = myTranslation?.translation_status ?? msg.translation_status;
+
+        // Resolve languages reliably from message metadata
         const sourceLang = getLanguageByCode(
           msg.source_language ||
             (isMe
               ? currentParticipant.language_code
               : otherParticipant?.language_code || 'en')
         );
-        const targetLang = getLanguageByCode(
-          msg.target_language ||
-            (isMe
-              ? otherParticipant?.language_code || 'hi'
-              : currentParticipant.language_code)
-        );
+        const targetLang = getLanguageByCode(effectiveTargetLangCode);
 
         return (
           <div
@@ -106,7 +110,7 @@ export function MessageList({
                     <span>Translation · {targetLang.name}</span>
                   </div>
 
-                  {msg.translation_status === 'translated' && (
+                  {effectiveStatus === 'translated' && (
                     <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 normal-case font-medium">
                       <CheckCircle2 className="w-3 h-3" />
                       <span>Synced</span>
@@ -115,7 +119,7 @@ export function MessageList({
                 </div>
 
                 {/* Status: Pending */}
-                {msg.translation_status === 'pending' && (
+                {effectiveStatus === 'pending' && (
                   <div className="flex items-center gap-2 py-1 text-slate-500 dark:text-zinc-400 text-xs">
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" />
                     <span>Translating live into {targetLang.name}...</span>
@@ -123,11 +127,11 @@ export function MessageList({
                 )}
 
                 {/* Status: Translated */}
-                {msg.translation_status === 'translated' && msg.translated_text && (
+                {effectiveStatus === 'translated' && effectiveTranslatedText && (
                   <div>
                     <div className="flex items-start justify-between gap-3">
                       <p className="text-xs sm:text-sm text-slate-700 dark:text-zinc-200 leading-relaxed font-medium flex-1 whitespace-pre-wrap select-text">
-                        &ldquo;{msg.translated_text}&rdquo;
+                        &ldquo;{effectiveTranslatedText}&rdquo;
                       </p>
 
                       {/* Manual Audio Playback Button */}

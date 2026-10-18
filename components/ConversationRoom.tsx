@@ -8,7 +8,15 @@ import {
   isSpeechRecognitionSupported,
   isSpeechSynthesisSupported,
 } from '@/lib/speech';
-import type { Room, Participant, Message, ConversationStatus } from '@/lib/types';
+import type {
+  Room,
+  Participant,
+  Message,
+  ConversationStatus,
+  JoinRequest,
+  AdmissionMode,
+  MessageTranslation,
+} from '@/lib/types';
 import { getLanguageByCode } from '@/lib/types';
 import { MessageList } from '@/components/MessageList';
 import { SpeakingPanel } from '@/components/SpeakingPanel';
@@ -26,19 +34,27 @@ type Props = {
 };
 
 export function ConversationRoom({
-  room,
+  room: initialRoom,
   currentParticipant: initialCurrentParticipant,
   initialOtherParticipant,
   initialMessages,
   userId,
 }: Props) {
+  // Room State
+  const [room, setRoom] = useState<Room>(initialRoom);
+
   // Participant State
   const [currentParticipant, setCurrentParticipant] = useState<Participant>(
     initialCurrentParticipant
   );
-  const [otherParticipant, setOtherParticipant] = useState<Participant | null>(
-    initialOtherParticipant
-  );
+  const [participants, setParticipants] = useState<Participant[]>([
+    initialCurrentParticipant,
+    ...(initialOtherParticipant ? [initialOtherParticipant] : []),
+  ]);
+  const otherParticipant = participants.find((p) => p.user_id !== userId) ?? null;
+
+  // Host Join Requests State
+  const [pendingRequests, setPendingRequests] = useState<JoinRequest[]>([]);
 
   // Message & Status State
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -82,7 +98,7 @@ export function ConversationRoom({
   const notifTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentParticipantRef = useRef(currentParticipant);
-  const otherParticipantRef = useRef(otherParticipant);
+  const participantsRef = useRef(participants);
   const autoPlayVoiceRef = useRef(autoPlayVoice);
   const isMutedRef = useRef(isMuted);
 
@@ -91,8 +107,8 @@ export function ConversationRoom({
   }, [currentParticipant]);
 
   useEffect(() => {
-    otherParticipantRef.current = otherParticipant;
-  }, [otherParticipant]);
+    participantsRef.current = participants;
+  }, [participants]);
 
   useEffect(() => {
     autoPlayVoiceRef.current = autoPlayVoice;
@@ -165,10 +181,82 @@ export function ConversationRoom({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Initial Load: Fetch full participant list, existing translations & pending join requests
+  useEffect(() => {
+    async function loadRoomDetails() {
+      // 1. Fetch participants
+      const { data: pList } = await supabase
+        .from('participants')
+        .select('*')
+        .eq('room_id', room.id);
+
+      if (pList && isMountedRef.current) {
+        setParticipants(pList);
+      }
+
+      // 2. Fetch join requests if creator
+      if (room.creator_id === userId) {
+        const { data: reqList } = await supabase
+          .from('join_requests')
+          .select('*')
+          .eq('room_id', room.id)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: true });
+
+        if (reqList && isMountedRef.current) {
+          setPendingRequests(reqList);
+        }
+      }
+
+      // 3. Fetch translations map
+      const { data: transList } = await supabase
+        .from('message_translations')
+        .select('*')
+        .eq('room_id', room.id);
+
+      if (transList && transList.length > 0 && isMountedRef.current) {
+        const transMap: Record<
+          string,
+          Record<
+            string,
+            {
+              translated_text: string;
+              target_language_name: string;
+              translation_status: 'pending' | 'translated' | 'failed';
+            }
+          >
+        > = {};
+
+        for (const t of transList) {
+          if (!transMap[t.message_id]) transMap[t.message_id] = {};
+          transMap[t.message_id][t.target_language] = {
+            translated_text: t.translated_text || '',
+            target_language_name: t.target_language_name,
+            translation_status: t.translation_status,
+          };
+        }
+
+        setMessages((prev) =>
+          prev.map((m) => (transMap[m.id] ? { ...m, translations: transMap[m.id] } : m))
+        );
+      }
+    }
+
+    loadRoomDetails();
+  }, [room.id, room.creator_id, userId]);
+
   // ─── Audio Playback Handler ───────────────────────────────────────────────
   const playMessageAudio = useCallback(
     (msg: Message, forceManual = false) => {
-      if (!isSpeechSynthesisSupported() || !msg.translated_text) return;
+      if (!isSpeechSynthesisSupported()) return;
+
+      const myLangCode = currentParticipantRef.current.language_code;
+      // Multi-participant translation resolution:
+      const myTranslation = msg.translations?.[myLangCode];
+      const textToSpeak = myTranslation?.translated_text || msg.translated_text;
+      const targetLang = myTranslation ? myLangCode : (msg.target_language || myLangCode);
+
+      if (!textToSpeak) return;
 
       // In auto mode, skip if muted or auto-play disabled or if it's own message
       if (!forceManual) {
@@ -184,11 +272,8 @@ export function ConversationRoom({
         setStatus('playing');
       }
 
-      // Speak in the target language of the translation
-      const targetLang = msg.target_language || currentParticipantRef.current.language_code;
-
       queueSpeech(
-        msg.translated_text,
+        textToSpeak,
         targetLang,
         () => {
           if (isMountedRef.current) {
@@ -211,7 +296,6 @@ export function ConversationRoom({
   const handleManualPlay = useCallback(
     (msg: Message) => {
       if (currentlyPlayingId === msg.id) {
-        // Stop currently playing
         stopSpeech();
         setCurrentlyPlayingId(null);
         setStatus('idle');
@@ -226,6 +310,24 @@ export function ConversationRoom({
   useEffect(() => {
     const channel = supabase
       .channel(`room:${room.id}`)
+      // Room settings updates
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'rooms',
+          filter: `id=eq.${room.id}`,
+        },
+        (payload) => {
+          const updatedRoom = payload.new as Room;
+          setRoom((prev) => ({
+            ...prev,
+            ...updatedRoom,
+          }));
+        }
+      )
+      // Messages table
       .on(
         'postgres_changes',
         {
@@ -240,21 +342,19 @@ export function ConversationRoom({
             const index = prev.findIndex((m) => m.id === newMsg.id);
             if (index !== -1) {
               const updated = [...prev];
-              updated[index] = newMsg;
+              updated[index] = { ...updated[index], ...newMsg };
               return updated;
             }
             return [...prev, newMsg];
           });
 
-          // Auto-play if incoming and already translated
           if (
-            newMsg.translation_status === 'translated' &&
             newMsg.sender_id !== userId &&
-            newMsg.translated_text &&
+            newMsg.translation_status === 'translated' &&
             !playedMessageIdsRef.current.has(newMsg.id)
           ) {
             playedMessageIdsRef.current.add(newMsg.id);
-            playMessageAudio(newMsg, false);
+            playMessageAudio(newMsg);
           }
         }
       )
@@ -267,23 +367,56 @@ export function ConversationRoom({
           filter: `room_id=eq.${room.id}`,
         },
         (payload) => {
-          const updated = payload.new as Message;
+          const updatedMsg = payload.new as Message;
           setMessages((prev) =>
-            prev.map((m) => (m.id === updated.id ? updated : m))
+            prev.map((m) => (m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m))
           );
 
-          // Auto-play translated messages directed at this user
           if (
-            updated.translation_status === 'translated' &&
-            updated.sender_id !== userId &&
-            updated.translated_text &&
-            !playedMessageIdsRef.current.has(updated.id)
+            updatedMsg.sender_id !== userId &&
+            updatedMsg.translation_status === 'translated' &&
+            !playedMessageIdsRef.current.has(updatedMsg.id)
           ) {
-            playedMessageIdsRef.current.add(updated.id);
-            playMessageAudio(updated, false);
+            playedMessageIdsRef.current.add(updatedMsg.id);
+            playMessageAudio(updatedMsg);
           }
         }
       )
+      // Multi-translations table
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'message_translations',
+          filter: `room_id=eq.${room.id}`,
+        },
+        (payload) => {
+          const trans = payload.new as MessageTranslation;
+          if (!trans) return;
+
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id === trans.message_id) {
+                const currentMap = m.translations || {};
+                return {
+                  ...m,
+                  translations: {
+                    ...currentMap,
+                    [trans.target_language]: {
+                      translated_text: trans.translated_text || '',
+                      target_language_name: trans.target_language_name,
+                      translation_status: trans.translation_status,
+                    },
+                  },
+                };
+              }
+              return m;
+            })
+          );
+        }
+      )
+      // Participants table
       .on(
         'postgres_changes',
         {
@@ -294,8 +427,12 @@ export function ConversationRoom({
         },
         (payload) => {
           const p = payload.new as Participant;
+          setParticipants((prev) => {
+            if (prev.some((x) => x.id === p.id)) return prev;
+            return [...prev, p];
+          });
+
           if (p.user_id !== userId) {
-            setOtherParticipant(p);
             const pLang = getLanguageByCode(p.language_code);
             showNotification(`${p.display_name} joined the room (${pLang.name})`);
           }
@@ -311,17 +448,64 @@ export function ConversationRoom({
         },
         (payload) => {
           const p = payload.new as Participant;
-          if (p.user_id !== userId) {
-            const oldLang = otherParticipantRef.current?.language_code;
-            setOtherParticipant(p);
-            if (oldLang && oldLang !== p.language_code) {
-              const newLang = getLanguageByCode(p.language_code);
-              showNotification(
-                `${p.display_name} switched their language to ${newLang.name}`
-              );
-            }
-          } else {
+          setParticipants((prev) => prev.map((x) => (x.id === p.id ? p : x)));
+
+          if (p.user_id === userId) {
             setCurrentParticipant(p);
+          } else {
+            const oldP = participantsRef.current.find((x) => x.id === p.id);
+            if (oldP && oldP.language_code !== p.language_code) {
+              const newLang = getLanguageByCode(p.language_code);
+              showNotification(`${p.display_name} switched their language to ${newLang.name}`);
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'participants',
+          filter: `room_id=eq.${room.id}`,
+        },
+        (payload) => {
+          const oldP = payload.old as Participant;
+          setParticipants((prev) => prev.filter((x) => x.id !== oldP.id));
+        }
+      )
+      // Join Requests (Host real-time notification & panel)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'join_requests',
+          filter: `room_id=eq.${room.id}`,
+        },
+        (payload) => {
+          if (room.creator_id !== userId) return;
+
+          const req = payload.new as JoinRequest;
+          if (!req) return;
+
+          if (payload.eventType === 'INSERT') {
+            if (req.status === 'pending') {
+              setPendingRequests((prev) => {
+                if (prev.some((r) => r.id === req.id)) return prev;
+                return [...prev, req];
+              });
+              showNotification(`${req.display_name} requested to join the room`);
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            if (req.status === 'pending') {
+              setPendingRequests((prev) => prev.map((r) => (r.id === req.id ? req : r)));
+            } else {
+              setPendingRequests((prev) => prev.filter((r) => r.id !== req.id));
+            }
+          } else if (payload.eventType === 'DELETE') {
+            const oldReq = payload.old as JoinRequest;
+            setPendingRequests((prev) => prev.filter((r) => r.id !== oldReq.id));
           }
         }
       )
@@ -339,7 +523,7 @@ export function ConversationRoom({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [room.id, userId, playMessageAudio, showNotification]);
+  }, [room.id, room.creator_id, userId, playMessageAudio, showNotification]);
 
   // ─── Runtime Language Change ──────────────────────────────────────────────
   const handleLanguageChange = useCallback(
@@ -371,13 +555,97 @@ export function ConversationRoom({
     [currentParticipant.id, showNotification]
   );
 
-  // ─── Send Message (Bidirectional & Independent) ───────────────────────────
+  // ─── Host Actions: Approve & Decline Join Requests ────────────────────────
+  const handleApproveRequest = useCallback(
+    async (requestId: string) => {
+      try {
+        const { data, error } = await supabase.rpc('resolve_join_request', {
+          p_request_id: requestId,
+          p_action: 'approve',
+        });
+
+        if (error) throw error;
+
+        const res = data as { success: boolean; error?: string };
+        if (!res.success) {
+          throw new Error(res.error || 'Failed to approve request');
+        }
+
+        setPendingRequests((prev) => prev.filter((r) => r.id !== requestId));
+        showNotification('Join request approved');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Could not approve request';
+        showNotification(msg);
+      }
+    },
+    [showNotification]
+  );
+
+  const handleDeclineRequest = useCallback(
+    async (requestId: string) => {
+      try {
+        const { error } = await supabase.rpc('resolve_join_request', {
+          p_request_id: requestId,
+          p_action: 'decline',
+        });
+
+        if (error) throw error;
+
+        setPendingRequests((prev) => prev.filter((r) => r.id !== requestId));
+        showNotification('Join request declined');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Could not decline request';
+        showNotification(msg);
+      }
+    },
+    [showNotification]
+  );
+
+  // ─── Host Actions: Update Room Settings ───────────────────────────────────
+  const handleUpdateSettings = useCallback(
+    async (maxCapacity: number, admissionMode: AdmissionMode) => {
+      const { data, error } = await supabase.rpc('update_room_settings', {
+        p_room_id: room.id,
+        p_max_capacity: maxCapacity,
+        p_admission_mode: admissionMode,
+      });
+
+      if (error) throw error;
+
+      const res = data as { success: boolean; error?: string };
+      if (!res.success) {
+        throw new Error(res.error || 'Failed to update settings');
+      }
+
+      setRoom((prev) => ({
+        ...prev,
+        max_capacity: maxCapacity,
+        admission_mode: admissionMode,
+      }));
+
+      showNotification('Room capacity & admission settings updated');
+    },
+    [room.id, showNotification]
+  );
+
+  // ─── Send Message (Multi-Participant Multilingual Translation) ────────────
   const sendMessage = useCallback(
     async (text: string) => {
-      if (!text.trim() || !otherParticipantRef.current) return;
+      if (!text.trim()) return;
 
       const sourceLangCode = currentParticipantRef.current.language_code;
-      const targetLangCode = otherParticipantRef.current.language_code;
+      const otherAdmitted = participantsRef.current.filter((p) => p.user_id !== userId);
+
+      // Collect unique target languages needed by other admitted participants
+      const uniqueTargets = Array.from(
+        new Set(
+          otherAdmitted
+            .map((p) => p.language_code)
+            .filter((code) => code && code !== sourceLangCode)
+        )
+      );
+
+      const primaryTargetLang = uniqueTargets[0] || sourceLangCode;
       const messageId = uuidv4();
 
       const optimisticMsg: Message = {
@@ -388,7 +656,7 @@ export function ConversationRoom({
         original_text: text.trim(),
         translated_text: null,
         source_language: sourceLangCode,
-        target_language: targetLangCode,
+        target_language: primaryTargetLang,
         translation_status: 'pending',
         created_at: new Date().toISOString(),
       };
@@ -407,20 +675,21 @@ export function ConversationRoom({
           sender_name: currentParticipantRef.current.display_name,
           original_text: text.trim(),
           source_language: sourceLangCode,
-          target_language: targetLangCode,
+          target_language: primaryTargetLang,
           translation_status: 'pending',
         });
 
         if (insertError) throw insertError;
 
-        // 2. Call server-side Gemini Translation API
+        // 2. Call server-side Gemini Translation API with multi-target support
         const res = await fetch('/api/translate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             text: text.trim(),
             sourceLanguage: sourceLangCode,
-            targetLanguage: targetLangCode,
+            targetLanguage: primaryTargetLang,
+            targetLanguages: uniqueTargets.length > 0 ? uniqueTargets : [sourceLangCode],
             roomId: room.id,
             messageId,
           }),
@@ -431,7 +700,42 @@ export function ConversationRoom({
           throw new Error(data.error || 'Translation service returned an error');
         }
 
-        // 3. Update message record in database with translation
+        const translationsMap: Record<
+          string,
+          {
+            translated_text: string;
+            target_language_name: string;
+            translation_status: 'pending' | 'translated' | 'failed';
+          }
+        > = {};
+
+        // 3. Persist multi-target translations into message_translations
+        if (data.translations && Object.keys(data.translations).length > 0) {
+          for (const [targetCode, translatedText] of Object.entries(
+            data.translations as Record<string, string>
+          )) {
+            const targetLang = getLanguageByCode(targetCode);
+            translationsMap[targetCode] = {
+              translated_text: translatedText,
+              target_language_name: targetLang.name,
+              translation_status: 'translated',
+            };
+
+            await supabase.from('message_translations').upsert(
+              {
+                message_id: messageId,
+                room_id: room.id,
+                target_language: targetCode,
+                target_language_name: targetLang.name,
+                translated_text: translatedText,
+                translation_status: 'translated',
+              },
+              { onConflict: 'message_id,target_language' }
+            );
+          }
+        }
+
+        // 4. Update message record in database with primary translation
         const { error: updateError } = await supabase
           .from('messages')
           .update({
@@ -450,6 +754,7 @@ export function ConversationRoom({
                     ...m,
                     translated_text: data.translatedText,
                     translation_status: 'translated',
+                    translations: translationsMap,
                   }
                 : m
             )
@@ -486,17 +791,24 @@ export function ConversationRoom({
     [room.id, userId]
   );
 
-  // ─── Retry Translation for a Failed Message ──────────────────────────────
+  // ─── Retry Translation ───────────────────────────────────────────────────
   const handleRetryTranslation = useCallback(
     async (msg: Message) => {
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === msg.id ? { ...m, translation_status: 'pending' } : m
-        )
+        prev.map((m) => (m.id === msg.id ? { ...m, translation_status: 'pending' } : m))
       );
       setStatus('translating');
 
       try {
+        const otherAdmitted = participantsRef.current.filter((p) => p.user_id !== userId);
+        const uniqueTargets = Array.from(
+          new Set(
+            otherAdmitted
+              .map((p) => p.language_code)
+              .filter((code) => code && code !== msg.source_language)
+          )
+        );
+
         const res = await fetch('/api/translate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -504,6 +816,7 @@ export function ConversationRoom({
             text: msg.original_text,
             sourceLanguage: msg.source_language,
             targetLanguage: msg.target_language,
+            targetLanguages: uniqueTargets.length > 0 ? uniqueTargets : [msg.target_language],
             roomId: room.id,
             messageId: msg.id,
           }),
@@ -514,7 +827,7 @@ export function ConversationRoom({
           throw new Error(data.error || 'Retry translation failed');
         }
 
-        const { error: updateError } = await supabase
+        await supabase
           .from('messages')
           .update({
             translated_text: data.translatedText,
@@ -522,124 +835,124 @@ export function ConversationRoom({
           })
           .eq('id', msg.id);
 
-        if (updateError) throw updateError;
-
         if (isMountedRef.current) {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === msg.id
-                ? {
-                    ...m,
-                    translated_text: data.translatedText,
-                    translation_status: 'translated',
-                  }
+                ? { ...m, translated_text: data.translatedText, translation_status: 'translated' }
                 : m
             )
           );
           setStatus('idle');
         }
       } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : 'Retry failed';
+        const errMsg = err instanceof Error ? err.message : 'Retry translation failed';
         if (isMountedRef.current) {
           setTranslationError(errMsg);
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === msg.id ? { ...m, translation_status: 'failed' } : m
-            )
+            prev.map((m) => (m.id === msg.id ? { ...m, translation_status: 'failed' } : m))
           );
           setStatus('error');
         }
       }
     },
-    [room.id]
+    [room.id, userId]
   );
 
-  // ─── Speech Recognition (Independent & Cross-Language) ───────────────────
+  // ─── Speech Recognition Handler ───────────────────────────────────────────
   const startListening = useCallback(() => {
     if (!isSpeechRecognitionSupported()) {
-      setSpeechError(
-        'Speech recognition is not supported in this browser. Please use text input instead.'
-      );
+      setSpeechError('Speech recognition is not supported in this browser.');
       return;
     }
 
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.abort();
-      } catch {
-        // ignore
-      }
-      recognitionRef.current = null;
-    }
+    stopSpeech();
+    setCurrentlyPlayingId(null);
 
-    setSpeechError('');
-    setTranscript('');
-
-    const SpeechRecognition =
+    const SpeechRecognitionAPI =
       window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    const currentLang = getLanguageByCode(currentParticipantRef.current.language_code);
-    recognition.lang = currentLang.speechCode;
+
+    const recognition = new SpeechRecognitionAPI();
+    recognitionRef.current = recognition;
+
+    const myLang = getLanguageByCode(currentParticipantRef.current.language_code);
+    recognition.lang = myLang.speechCode;
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
+    transcriptRef.current = '';
+    setTranscript('');
+    setIsMicActive(true);
+    setStatus('listening');
+    setSpeechError('');
+
     recognition.onstart = () => {
       if (isMountedRef.current) {
-        setStatus('listening');
         setIsMicActive(true);
+        setStatus('listening');
       }
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const result = event.results[event.results.length - 1];
-      const text = result[0].transcript;
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const item = event.results[i];
+        if (item.isFinal) {
+          finalTranscript += item[0].transcript;
+        } else {
+          interimTranscript += item[0].transcript;
+        }
+      }
+
+      const current = finalTranscript || interimTranscript;
+      transcriptRef.current = current;
       if (isMountedRef.current) {
-        setTranscript(text);
-        transcriptRef.current = text;
-        if (result.isFinal) {
-          setStatus('speaking');
+        setTranscript(current);
+      }
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.warn('Speech recognition error:', event.error);
+      if (isMountedRef.current) {
+        setIsMicActive(false);
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          setSpeechError(`Microphone error: ${event.error}`);
+          setStatus('error');
+          if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+          errorTimeoutRef.current = setTimeout(() => {
+            if (isMountedRef.current) setStatus('idle');
+          }, 3500);
+        } else {
+          setStatus('idle');
         }
       }
     };
 
     recognition.onend = () => {
-      if (isMountedRef.current) {
-        setIsMicActive(false);
-      }
-      recognitionRef.current = null;
-      const finalText = transcriptRef.current || '';
-      transcriptRef.current = '';
-      if (finalText.trim()) {
-        sendMessage(finalText);
-        if (isMountedRef.current) setTranscript('');
-      } else {
-        if (isMountedRef.current) setStatus('idle');
-      }
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (isMountedRef.current) {
-        setIsMicActive(false);
-      }
-      recognitionRef.current = null;
       if (!isMountedRef.current) return;
+      setIsMicActive(false);
 
-      if (event.error === 'not-allowed') {
-        setSpeechError(
-          'Microphone permission denied. Please allow microphone access and try again.'
-        );
-      } else if (event.error === 'no-speech') {
-        setSpeechError('No speech detected. Try speaking closer to your microphone.');
-        setStatus('idle');
-      } else if (event.error !== 'aborted') {
-        setSpeechError(`Speech error: ${event.error}`);
+      const captured = transcriptRef.current.trim();
+      transcriptRef.current = '';
+      setTranscript('');
+
+      if (captured) {
+        sendMessage(captured);
+      } else {
         setStatus('idle');
       }
     };
 
-    recognitionRef.current = recognition;
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (err) {
+      console.warn('Failed to start speech recognition:', err);
+      setIsMicActive(false);
+      setStatus('idle');
+    }
   }, [sendMessage]);
 
   const stopListening = useCallback(() => {
@@ -654,13 +967,11 @@ export function ConversationRoom({
 
   // ─── Interrupt Partner ───────────────────────────────────────────────────
   const handleInterrupt = useCallback(() => {
-    // 1. Instantly stop all speech playback & invalidate pending audio
     stopSpeech();
     setCurrentlyPlayingId(null);
     setIsInterrupting(true);
     setStatus('interrupted');
 
-    // 2. Open microphone immediately for interrupting speaker
     setTimeout(() => {
       if (isMountedRef.current) {
         setIsInterrupting(false);
@@ -683,11 +994,15 @@ export function ConversationRoom({
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 overflow-hidden transition-colors">
-      {/* Header with Runtime Language Switching & Independent Audio Controls */}
+      {/* Header with Runtime Language Switching, Occupancy, Host Settings & Requests */}
       <RoomHeader
         room={room}
         currentParticipant={currentParticipant}
-        otherParticipant={otherParticipant}
+        participants={participants}
+        pendingRequests={pendingRequests}
+        onApproveRequest={handleApproveRequest}
+        onDeclineRequest={handleDeclineRequest}
+        onUpdateSettings={handleUpdateSettings}
         connectionError={connectionError}
         status={status}
         autoPlayVoice={autoPlayVoice}
@@ -697,7 +1012,7 @@ export function ConversationRoom({
         onLanguageChange={handleLanguageChange}
       />
 
-      {/* Floating System Notification (e.g. Partner switched language) */}
+      {/* Floating System Notification */}
       {systemNotification && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all">
           <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 text-white dark:bg-white/90 dark:text-zinc-900 shadow-lg text-xs font-medium backdrop-blur-xs">
@@ -716,16 +1031,16 @@ export function ConversationRoom({
                 <span className="text-xl">⚡</span>
               </div>
               <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
-                {otherParticipant
+                {participants.length > 1
                   ? 'Active Debate Session'
-                  : 'Awaiting Second Participant'}
+                  : 'Awaiting Participants'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed mb-4">
-                {otherParticipant
-                  ? 'Send a message or tap the mic. Original text and translations are displayed live for both participants.'
-                  : 'Share the room code or invitation URL with your partner to start the live translation.'}
+                {participants.length > 1
+                  ? 'Send a message or tap the mic. Original text and translations are synchronized live for all participants.'
+                  : `Share the room code or invitation URL. Configured for up to ${room.max_capacity} participants.`}
               </p>
-              {!otherParticipant && (
+              {participants.length <= 1 && (
                 <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-slate-700 dark:text-zinc-300 font-mono shadow-xs">
                   <span>Room:</span>
                   <span className="font-bold tracking-wider">{room.code}</span>

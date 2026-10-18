@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx lib/__tests__/fullAudit.test.ts"
+    "test": "tsx lib/__tests__/runAllTests.ts"
   },
   "dependencies": {
     "@babel/types": "^7.29.8",

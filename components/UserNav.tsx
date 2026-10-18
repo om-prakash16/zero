@@ -164,7 +164,7 @@ export function UserNav() {
 
                 {isSuperAdmin && (
                   <Link
-                    href="/admin"
+                    href="/superadmin"
                     onClick={() => setIsMenuOpen(false)}
                     className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer border border-amber-500/20"
                   >

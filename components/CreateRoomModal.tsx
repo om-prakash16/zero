@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import {
   X,
   Mic,
-  Globe,
   User,
   Sparkles,
   ArrowRight,
@@ -15,9 +14,14 @@ import {
   AlertCircle,
   Loader2,
   RefreshCw,
+  ShieldCheck,
+  UserCheck,
+  Minus,
+  Plus,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { SUPPORTED_LANGUAGES, getLanguageByCode } from '@/lib/types';
+import { getLanguageByCode, type AdmissionMode } from '@/lib/types';
+import { LanguageSelector } from '@/components/LanguageSelector';
 import { generateRoomCode, formatRoomCode, getRoomInviteUrl } from '@/lib/roomCode';
 
 interface CreateRoomModalProps {
@@ -44,6 +48,8 @@ export function CreateRoomModal({
 
   const [displayName, setDisplayName] = useState(defaultDisplayName);
   const [languageCode, setLanguageCode] = useState(defaultLanguageCode);
+  const [maxCapacity, setMaxCapacity] = useState<number>(2);
+  const [admissionMode, setAdmissionMode] = useState<AdmissionMode>('approval_required');
   const [previewCode, setPreviewCode] = useState('brave-wolf-42');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,6 +153,9 @@ export function CreateRoomModal({
           code,
           is_active: true,
           participant_count: 0,
+          creator_id: uid,
+          max_capacity: Math.max(2, Math.min(16, maxCapacity)),
+          admission_mode: admissionMode,
         })
         .select()
         .single();
@@ -251,36 +260,105 @@ export function CreateRoomModal({
             </div>
 
             {/* Native Language */}
-            <div>
-              <label
-                htmlFor="creator-language"
-                className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1"
-              >
-                Your Preferred Language
-              </label>
-              <div className="relative">
-                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 dark:text-zinc-500">
-                  <Globe className="h-4 w-4" />
-                </div>
-                <select
-                  id="creator-language"
-                  value={languageCode}
-                  onChange={(e) => setLanguageCode(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-8 py-2.5 text-xs sm:text-sm text-slate-900 dark:text-white focus:border-rose-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden cursor-pointer appearance-none"
+            <LanguageSelector
+              selectedCode={languageCode}
+              onSelect={setLanguageCode}
+              label="Your Preferred Language"
+              variant="full"
+            />
+
+            {/* Room Capacity Selector */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                  Room Capacity
+                </label>
+                <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400">
+                  {maxCapacity} {maxCapacity === 1 ? 'participant' : 'participants'} total
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMaxCapacity((c) => Math.max(2, c - 1))}
+                  disabled={maxCapacity <= 2}
+                  className="h-9 w-9 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 flex items-center justify-center text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  title="Decrease capacity"
                 >
-                  {SUPPORTED_LANGUAGES.map((lang) => (
-                    <option
-                      key={lang.code}
-                      value={lang.code}
-                      className="bg-white dark:bg-zinc-900 text-slate-900 dark:text-white"
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+                <div className="flex-1 flex gap-1 justify-between overflow-x-auto py-0.5">
+                  {[2, 3, 4, 6, 8, 12, 16].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setMaxCapacity(num)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                        maxCapacity === num
+                          ? 'bg-rose-600 text-white shadow-xs font-bold'
+                          : 'bg-slate-100 dark:bg-zinc-800/80 text-slate-600 dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-700'
+                      }`}
                     >
-                      {lang.name} — {lang.nativeName} ({lang.code})
-                    </option>
+                      {num === 2 ? '2 (1-on-1)' : num}
+                    </button>
                   ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 text-xs">
-                  ▼
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setMaxCapacity((c) => Math.min(16, c + 1))}
+                  disabled={maxCapacity >= 16}
+                  className="h-9 w-9 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 flex items-center justify-center text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  title="Increase capacity"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400 dark:text-zinc-500">
+                Default is 2 (you + 1 partner). Configurable up to 16 for group multilingual discussions.
+              </p>
+            </div>
+
+            {/* Admission Mode Setting */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                Admission Mode
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAdmissionMode('approval_required')}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                    admissionMode === 'approval_required'
+                      ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-200 ring-1 ring-rose-500/30'
+                      : 'border-slate-200 dark:border-zinc-700/80 bg-slate-50/50 dark:bg-zinc-800/40 text-slate-700 dark:text-zinc-300 hover:border-slate-300 dark:hover:border-zinc-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 mb-1 font-semibold text-xs">
+                    <ShieldCheck className={`w-3.5 h-3.5 ${admissionMode === 'approval_required' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`} />
+                    <span>Host Approval</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-tight">
+                    Guests wait for you to approve before entering.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAdmissionMode('auto_approve')}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                    admissionMode === 'auto_approve'
+                      ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-200 ring-1 ring-rose-500/30'
+                      : 'border-slate-200 dark:border-zinc-700/80 bg-slate-50/50 dark:bg-zinc-800/40 text-slate-700 dark:text-zinc-300 hover:border-slate-300 dark:hover:border-zinc-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 mb-1 font-semibold text-xs">
+                    <UserCheck className={`w-3.5 h-3.5 ${admissionMode === 'auto_approve' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`} />
+                    <span>Auto-Approve</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-tight">
+                    Guests enter immediately until room capacity is reached.
+                  </p>
+                </button>
               </div>
             </div>
 
@@ -305,7 +383,7 @@ export function CreateRoomModal({
                   {formatRoomCode(previewCode)}
                 </span>
                 <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400">
-                  1-on-1 Max
+                  {maxCapacity} Max · {admissionMode === 'approval_required' ? 'Manual' : 'Auto'}
                 </span>
               </div>
 

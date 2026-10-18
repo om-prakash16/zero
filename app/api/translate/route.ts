@@ -36,7 +36,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let body: { text?: string; sourceLanguage?: string; targetLanguage?: string; roomId?: string; messageId?: string };
+  let body: {
+    text?: string;
+    sourceLanguage?: string;
+    targetLanguage?: string;
+    targetLanguages?: string[];
+    roomId?: string;
+    messageId?: string;
+  };
 
   try {
     body = await request.json();
@@ -47,7 +54,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { text, sourceLanguage, targetLanguage, roomId, messageId } = body;
+  const { text, sourceLanguage, targetLanguage, targetLanguages, roomId, messageId } = body;
 
   // Validate inputs
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -57,24 +64,41 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (
-    !sourceLanguage ||
-    !targetLanguage ||
-    typeof sourceLanguage !== 'string' ||
-    typeof targetLanguage !== 'string'
-  ) {
+  if (!sourceLanguage || typeof sourceLanguage !== 'string') {
     return NextResponse.json(
-      { success: false, error: 'sourceLanguage and targetLanguage are required strings' },
+      { success: false, error: 'sourceLanguage is required string' },
+      { status: 400 }
+    );
+  }
+
+  // Resolve target language list
+  const requestedTargets: string[] = Array.isArray(targetLanguages) && targetLanguages.length > 0
+    ? targetLanguages
+    : targetLanguage ? [targetLanguage] : [];
+
+  if (requestedTargets.length === 0) {
+    return NextResponse.json(
+      { success: false, error: 'targetLanguage or targetLanguages array is required' },
       { status: 400 }
     );
   }
 
   const isSourceSupported = SUPPORTED_LANGUAGES.some((l) => l.code === sourceLanguage);
-  const isTargetSupported = SUPPORTED_LANGUAGES.some((l) => l.code === targetLanguage);
-
-  if (!isSourceSupported || !isTargetSupported) {
+  if (!isSourceSupported) {
     return NextResponse.json(
-      { success: false, error: 'Unsupported sourceLanguage or targetLanguage' },
+      { success: false, error: `Unsupported sourceLanguage: ${sourceLanguage}` },
+      { status: 400 }
+    );
+  }
+
+  // Filter to valid unique targets
+  const uniqueTargets = Array.from(new Set(requestedTargets)).filter((t) =>
+    SUPPORTED_LANGUAGES.some((l) => l.code === t)
+  );
+
+  if (uniqueTargets.length === 0) {
+    return NextResponse.json(
+      { success: false, error: 'No supported target languages found in request' },
       { status: 400 }
     );
   }
@@ -100,59 +124,70 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (sourceLanguage === targetLanguage) {
-    // Same language: return as-is
-    return NextResponse.json({
-      success: true,
-      translatedText: text.trim(),
-    });
-  }
-
   const sourceLang = getLanguageByCode(sourceLanguage);
-  const targetLang = getLanguageByCode(targetLanguage);
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const translations: Record<string, string> = {};
 
   try {
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-
-    const prompt = buildTranslationPrompt(
-      text.trim(),
-      sourceLang.name,
-      targetLang.name
-    );
-
-    let translatedText = '';
-    const maxRetries = 2;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            temperature: 0.1, // Low temperature for precise translation
-            maxOutputTokens: 2048,
-          },
-        });
-
-        translatedText = response.text?.trim() ?? '';
-        if (translatedText) break;
-      } catch (attemptErr: unknown) {
-        const msg = attemptErr instanceof Error ? attemptErr.message : '';
-        const isRetryable = msg.includes('503') || msg.includes('demand');
-        if (isRetryable && attempt < maxRetries) {
-          await new Promise((r) => setTimeout(r, 800));
-          continue;
-        }
-        throw attemptErr;
+    for (const targetCode of uniqueTargets) {
+      if (targetCode === sourceLanguage) {
+        translations[targetCode] = text.trim();
+        continue;
       }
+
+      const targetLang = getLanguageByCode(targetCode);
+      const prompt = buildTranslationPrompt(
+        text.trim(),
+        sourceLang.name,
+        targetLang.name
+      );
+
+      let translatedText = '';
+      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.8-flash'];
+      let lastErr: unknown = null;
+
+      for (const modelName of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: {
+              temperature: 0.1,
+              maxOutputTokens: 2048,
+            },
+          });
+
+          translatedText = response.text?.trim() ?? '';
+          if (translatedText) break;
+        } catch (attemptErr: unknown) {
+          lastErr = attemptErr;
+          const msg = attemptErr instanceof Error ? attemptErr.message : '';
+          const isQuotaOrDown = msg.includes('429') || msg.includes('quota') || msg.includes('503') || msg.includes('demand');
+          if (isQuotaOrDown) {
+            continue; // try next candidate model
+          }
+          throw attemptErr;
+        }
+      }
+
+      if (!translatedText && lastErr) {
+        throw lastErr;
+      }
+
+      if (!translatedText) {
+        throw new Error(`Empty response from Gemini for target language: ${targetLang.name}`);
+      }
+
+      translations[targetCode] = translatedText;
     }
 
-    if (!translatedText) {
-      throw new Error('Empty response from Gemini');
-    }
+    const firstTarget = uniqueTargets[0];
+    const primaryTranslatedText = translations[firstTarget] || text.trim();
 
     return NextResponse.json({
       success: true,
-      translatedText,
+      translatedText: primaryTranslatedText,
+      translations,
     });
   } catch (error: unknown) {
     console.error('Gemini translation error:', error);
