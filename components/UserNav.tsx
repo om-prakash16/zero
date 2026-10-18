@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import { LogIn, LogOut, Loader2, Crown, ShieldCheck, User as UserIcon } from 'lucide-react';
@@ -160,6 +161,17 @@ export function UserNav() {
                     </p>
                   )}
                 </div>
+
+                {isSuperAdmin && (
+                  <Link
+                    href="/admin"
+                    onClick={() => setIsMenuOpen(false)}
+                    className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer border border-amber-500/20"
+                  >
+                    <Crown className="h-3.5 w-3.5 text-amber-400" />
+                    <span>Super Admin Console</span>
+                  </Link>
+                )}
 
                 <button
                   onClick={handleSignOut}

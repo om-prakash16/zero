@@ -692,7 +692,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                         type="text"
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
-                        placeholder="Om Prakash Kumar"
+                        placeholder="e.g. Alex Smith"
                         required
                         className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
                       />
@@ -710,7 +710,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                         max="120"
                         value={age}
                         onChange={(e) => setAge(e.target.value)}
-                        placeholder="25"
+                        placeholder="e.g. 24"
                         required
                         className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 px-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
                       />
@@ -745,7 +745,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                         type="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="prakash.om.global@gmail.com"
+                        placeholder="name@example.com"
                         required
                         className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-violet-500 focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
                       />
