@@ -262,8 +262,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const handleVerifySignupOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const token = otp.join('').trim();
-    if (token.length !== 8) {
-      setError('Please enter all 8 digits of your verification code');
+    if (token.length < 6) {
+      setError('Please enter your verification code');
       return;
     }
 
@@ -413,8 +413,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const handleVerifyResetOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const token = otp.join('').trim();
-    if (token.length !== 8) {
-      setError('Please enter all 8 digits of your verification code');
+    if (token.length < 6) {
+      setError('Please enter your reset code');
       return;
     }
 
@@ -524,8 +524,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const handleVerifySignInOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const token = otp.join('').trim();
-    if (token.length !== 8) {
-      setError('Please enter all 8 digits of your verification code');
+    if (token.length < 6) {
+      setError('Please enter your verification code');
       return;
     }
 
@@ -887,7 +887,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
                   <button
                     type="submit"
-                    disabled={isLoading || otp.join('').length !== 8}
+                    disabled={isLoading || otp.join('').trim().length < 6}
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B5282A] hover:bg-[#9E1B1D] px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-[#B5282A]/25 transition-all disabled:opacity-50 cursor-pointer"
                   >
                     {isLoading ? (
@@ -1038,7 +1038,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
                   <button
                     type="submit"
-                    disabled={isLoading || otp.join('').length !== 8}
+                    disabled={isLoading || otp.join('').trim().length < 6}
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B5282A] hover:bg-[#9E1B1D] px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-[#B5282A]/25 transition-all disabled:opacity-50 cursor-pointer"
                   >
                     {isLoading ? (
@@ -1268,7 +1268,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
                   <button
                     type="submit"
-                    disabled={isLoading || otp.join('').length !== 8}
+                    disabled={isLoading || otp.join('').trim().length < 6}
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B5282A] hover:bg-[#9E1B1D] px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-[#B5282A]/25 transition-all disabled:opacity-50 cursor-pointer"
                   >
                     {isLoading ? (
