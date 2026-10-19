@@ -28,12 +28,21 @@ export async function GET(request: Request) {
     }
 
     const email = user.email?.toLowerCase();
-    const role = user.user_metadata?.role;
-    const isSuperAdmin = email === 'prakash.om.global@gmail.com' || role === 'super_admin';
+    
+    // Check role in profiles
+    const { data: profile } = await adminClient
+      .from('profiles')
+      .select('role, status')
+      .eq('id', user.id)
+      .maybeSingle();
 
-    if (!isSuperAdmin) {
+    const dbRole = profile?.role || user.user_metadata?.role;
+    const isSuperAdmin = email === 'prakash.om.global@gmail.com' || dbRole === 'superadmin' || dbRole === 'super_admin';
+    const isAdmin = email === 'admin@roomchat.com' || dbRole === 'admin';
+
+    if (!isSuperAdmin && !isAdmin) {
       return NextResponse.json(
-        { error: 'Forbidden: Super Admin privileges required' },
+        { error: 'Forbidden: Admin or Super Admin privileges required' },
         { status: 403 }
       );
     }
@@ -125,10 +134,18 @@ export async function POST(request: Request) {
     } = await adminClient.auth.getUser(token);
 
     const email = user?.email?.toLowerCase();
-    const isSuperAdmin = email === 'prakash.om.global@gmail.com' || user?.user_metadata?.role === 'super_admin';
+    const { data: profile } = await adminClient
+      .from('profiles')
+      .select('role, status')
+      .eq('id', user?.id || '')
+      .maybeSingle();
 
-    if (!isSuperAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const dbRole = profile?.role || user?.user_metadata?.role;
+    const isSuperAdmin = email === 'prakash.om.global@gmail.com' || dbRole === 'superadmin' || dbRole === 'super_admin';
+    const isAdmin = email === 'admin@roomchat.com' || dbRole === 'admin';
+
+    if (!isSuperAdmin && !isAdmin) {
+      return NextResponse.json({ error: 'Forbidden: Admin or Super Admin privileges required' }, { status: 403 });
     }
 
     const body = await request.json();

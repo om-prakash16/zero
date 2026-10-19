@@ -121,7 +121,8 @@ export default function AdminDashboardPage() {
       setCurrentUserEmail(email);
 
       const isSuperAdmin = email === 'prakash.om.global@gmail.com' || session.user?.user_metadata?.role === 'super_admin';
-      if (!isSuperAdmin) {
+      const isAdmin = email === 'admin@roomchat.com' || session.user?.user_metadata?.role === 'admin';
+      if (!isSuperAdmin && !isAdmin) {
         setIsAuthorized(false);
         setIsLoading(false);
         setIsRefreshing(false);
@@ -274,7 +275,7 @@ export default function AdminDashboardPage() {
             Restricted Admin Area
           </h1>
           <p className="text-xs text-slate-600 dark:text-zinc-400 mb-6 leading-relaxed">
-            This dashboard is exclusively accessible to the <strong>Super Administrator</strong> (<code>prakash.om.global@gmail.com</code>).
+            This dashboard is exclusively accessible to authorized <strong>Administrators</strong> and <strong>Super Administrators</strong>.
           </p>
           <div className="space-y-3">
             <Link
@@ -336,8 +337,14 @@ export default function AdminDashboardPage() {
                 <span className="font-bold text-sm tracking-tight text-slate-900 dark:text-white">
                   CROSSWIRE Console
                 </span>
-                <span className="rounded-full bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 text-[10px] font-bold text-amber-500 dark:text-amber-400">
-                  SUPER ADMIN
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                    currentUserEmail === 'prakash.om.global@gmail.com'
+                      ? 'bg-amber-500/20 border-amber-500/30 text-amber-500 dark:text-amber-400'
+                      : 'bg-rose-500/20 border-rose-500/30 text-rose-500 dark:text-rose-400'
+                  }`}
+                >
+                  {currentUserEmail === 'prakash.om.global@gmail.com' ? 'SUPER ADMIN' : 'ADMIN'}
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 dark:text-zinc-500 hidden sm:block">

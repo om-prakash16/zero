@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
-import { LogIn, LogOut, Loader2, Crown, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { LogIn, LogOut, Loader2, Crown, ShieldCheck, User as UserIcon, LayoutDashboard, Activity } from 'lucide-react';
 import { AuthModal } from '@/components/AuthModal';
 
 export function UserNav() {
@@ -73,7 +73,14 @@ export function UserNav() {
   const isSuperAdmin =
     user?.email?.toLowerCase() === 'prakash.om.global@gmail.com' ||
     user?.user_metadata?.role === 'super_admin' ||
+    user?.user_metadata?.role === 'superadmin' ||
     user?.user_metadata?.is_super_admin === true;
+
+  const isAdmin =
+    user?.email?.toLowerCase() === 'admin@roomchat.com' ||
+    user?.user_metadata?.role === 'admin';
+
+  const hasAdminAccess = isSuperAdmin || isAdmin;
 
   const username = user?.user_metadata?.username;
   const age = user?.user_metadata?.age;
@@ -88,6 +95,8 @@ export function UserNav() {
             className={`flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
               isSuperAdmin
                 ? 'border-amber-500/50 bg-gradient-to-r from-amber-500/15 to-violet-500/15 text-white hover:border-amber-400 shadow-xs'
+                : isAdmin
+                ? 'border-rose-500/50 bg-gradient-to-r from-rose-500/15 to-amber-500/15 text-white hover:border-rose-400 shadow-xs'
                 : 'border-zinc-700/80 bg-zinc-800/80 text-white hover:bg-zinc-750 hover:border-zinc-600'
             }`}
           >
@@ -100,7 +109,7 @@ export function UserNav() {
                 crossOrigin="anonymous"
                 onError={() => setImgError(true)}
                 className={`h-6 w-6 rounded-full object-cover ring-1 ${
-                  isSuperAdmin ? 'ring-amber-400' : 'ring-violet-500/40'
+                  isSuperAdmin ? 'ring-amber-400' : isAdmin ? 'ring-rose-400' : 'ring-violet-500/40'
                 }`}
               />
             ) : (
@@ -108,6 +117,8 @@ export function UserNav() {
                 className={`flex h-6 w-6 items-center justify-center rounded-full font-bold text-[11px] ${
                   isSuperAdmin
                     ? 'bg-amber-500 text-slate-950 ring-1 ring-amber-300'
+                    : isAdmin
+                    ? 'bg-rose-500 text-white ring-1 ring-rose-300'
                     : 'bg-violet-600/40 text-violet-300'
                 }`}
               >
@@ -117,12 +128,17 @@ export function UserNav() {
 
             <span className="hidden sm:inline max-w-[120px] truncate">{displayName}</span>
 
-            {isSuperAdmin && (
+            {isSuperAdmin ? (
               <span className="flex items-center gap-1 rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/30">
                 <Crown className="h-3 w-3 text-amber-400" />
                 <span className="hidden md:inline">SUPER ADMIN</span>
               </span>
-            )}
+            ) : isAdmin ? (
+              <span className="flex items-center gap-1 rounded-md bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-bold text-rose-300 border border-rose-500/30">
+                <ShieldCheck className="h-3 w-3 text-rose-400" />
+                <span className="hidden md:inline">ADMIN</span>
+              </span>
+            ) : null}
           </button>
 
           {/* User dropdown menu */}
@@ -137,6 +153,11 @@ export function UserNav() {
                       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[9px] font-bold text-amber-300 border border-amber-500/40">
                         <Crown className="h-2.5 w-2.5" />
                         SUPER ADMIN
+                      </span>
+                    ) : isAdmin ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/20 px-2 py-0.5 text-[9px] font-bold text-rose-300 border border-rose-500/40">
+                        <ShieldCheck className="h-2.5 w-2.5" />
+                        ADMIN
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-medium text-violet-300">
@@ -162,15 +183,26 @@ export function UserNav() {
                   )}
                 </div>
 
-                {isSuperAdmin && (
-                  <Link
-                    href="/superadmin"
-                    onClick={() => setIsMenuOpen(false)}
-                    className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer border border-amber-500/20"
-                  >
-                    <Crown className="h-3.5 w-3.5 text-amber-400" />
-                    <span>Super Admin Console</span>
-                  </Link>
+                {hasAdminAccess && (
+                  <div className="space-y-1 my-1">
+                    <Link
+                      href="/superadmin"
+                      onClick={() => setIsMenuOpen(false)}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer border border-rose-500/20"
+                    >
+                      <LayoutDashboard className="h-3.5 w-3.5 text-rose-400" />
+                      <span>{isSuperAdmin ? 'Super Admin Management' : 'Admin Control Center'}</span>
+                    </Link>
+
+                    <Link
+                      href="/admin"
+                      onClick={() => setIsMenuOpen(false)}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer border border-amber-500/20"
+                    >
+                      <Activity className="h-3.5 w-3.5 text-amber-400" />
+                      <span>All Users & Messages Feed</span>
+                    </Link>
+                  </div>
                 )}
 
                 <button
