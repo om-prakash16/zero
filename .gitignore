@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# internal reports & scratch files
+brain.md
+AGENTS.md
+*_REPORT.md
