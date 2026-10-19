@@ -139,13 +139,15 @@ export async function verifySuperAdmin(
 
     const isSuperAdmin = profile.role === 'superadmin' || isBootstrapSuperAdmin;
     const isAdmin = profile.role === 'admin';
-    const allowAdmin = options?.allowAdmin ?? true;
+    const allowAdmin = options?.allowAdmin ?? false;
 
     if (!isSuperAdmin && (!allowAdmin || !isAdmin)) {
       return {
         authorized: false,
         status: 403,
-        error: 'Forbidden: Superadmin or Admin privileges required to access this resource',
+        error: allowAdmin
+          ? 'Forbidden: Superadmin or Admin privileges required to access this resource'
+          : 'Forbidden: Superadmin privileges required to perform this action',
       };
     }
 

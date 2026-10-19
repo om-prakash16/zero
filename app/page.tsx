@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Globe,
@@ -19,17 +19,78 @@ import { normalizeRoomCode } from '@/lib/roomCode';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { CreateRoomModal } from '@/components/CreateRoomModal';
+import { AuthModal } from '@/components/AuthModal';
 import { SUPPORTED_LANGUAGES } from '@/lib/types';
+import type { User } from '@supabase/supabase-js';
 
 export default function HomePage() {
   const router = useRouter();
   const [joinCode, setJoinCode] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'create' | 'join' | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
+
+  // Track authenticated (non-anonymous) user
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user && !session.user.is_anonymous) {
+        setUser(session.user);
+      } else {
+        setUser(null);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user && !session.user.is_anonymous) {
+        setUser(session.user);
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // After successful auth, execute the pending action
+  const handleAuthSuccess = () => {
+    setIsAuthOpen(false);
+    if (pendingAction === 'create') {
+      setIsCreateModalOpen(true);
+    } else if (pendingAction === 'join') {
+      // User just signed in, now let them submit the join form normally
+      // The form will re-check auth on next submit
+    }
+    setPendingAction(null);
+  };
+
+  // Gate: require account before creating room
+  const handleCreateRoomClick = () => {
+    if (!user) {
+      setPendingAction('create');
+      setIsAuthOpen(true);
+      return;
+    }
+    setIsCreateModalOpen(true);
+  };
 
   async function handleJoinRoom(e: React.FormEvent) {
     e.preventDefault();
+
+    // Require authenticated (non-anonymous) account to join rooms
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session || sessionData.session.user.is_anonymous) {
+      setPendingAction('join');
+      setIsAuthOpen(true);
+      return;
+    }
+
     const code = normalizeRoomCode(joinCode);
     if (!code) {
       setError('Please enter a valid room code or invitation link');
@@ -40,12 +101,6 @@ export default function HomePage() {
     setError('');
 
     try {
-      // Sign in anonymously if not already signed in
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        const { error: signInError } = await supabase.auth.signInAnonymously();
-        if (signInError) throw signInError;
-      }
 
       // Check room exists
       const { data: room, error: roomError } = await supabase
@@ -94,7 +149,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen hero-gradient grid-pattern relative flex flex-col justify-between">
       {/* Professional Responsive Navbar */}
-      <Navbar onStartArgument={() => setIsCreateModalOpen(true)} onJoinRoom={scrollToJoin} />
+      <Navbar onStartArgument={handleCreateRoomClick} onJoinRoom={scrollToJoin} />
 
       {/* Hero Content */}
       <main className="flex-1 max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-16 flex flex-col items-center text-center">
@@ -148,7 +203,7 @@ export default function HomePage() {
                 </span>
               </div>
               <button
-                onClick={() => setIsCreateModalOpen(true)}
+                onClick={handleCreateRoomClick}
                 type="button"
                 className="w-full h-12 flex items-center justify-center gap-2.5 px-6 rounded-xl font-semibold text-sm text-white bg-[#B5282A] hover:bg-[#9E1B1D] transition-all shadow-md shadow-[#B5282A]/25 active:scale-[0.99] cursor-pointer"
               >
@@ -232,8 +287,8 @@ export default function HomePage() {
             <div className="text-xs text-white/80 mt-1 font-medium">Voice Interruption</div>
           </div>
           <div>
-            <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#FFAA00]">No Login</div>
-            <div className="text-xs text-white/80 mt-1 font-medium">Instant Guest Entry</div>
+            <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#FFAA00]">Secure</div>
+            <div className="text-xs text-white/80 mt-1 font-medium">Account Verified Entry</div>
           </div>
         </div>
 
@@ -368,6 +423,16 @@ export default function HomePage() {
       <CreateRoomModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
+      />
+
+      {/* Auth Modal — shown when unauthenticated user tries to create/join */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => {
+          setIsAuthOpen(false);
+          setPendingAction(null);
+        }}
+        onSuccess={handleAuthSuccess}
       />
     </div>
   );

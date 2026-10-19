@@ -120,16 +120,13 @@ export function CreateRoomModal({
       setIsCreating(true);
       setError(null);
 
-      // 1. Ensure active session (anonymous or authenticated)
-      let { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        const { data: signInData, error: signInError } = await supabase.auth.signInAnonymously();
-        if (signInError) throw signInError;
-        sessionData = { session: signInData.session };
+      // 1. Require authenticated (non-anonymous) session
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session || sessionData.session.user.is_anonymous) {
+        throw new Error('You must sign in with an account before creating a room.');
       }
 
-      const uid = sessionData.session?.user?.id;
-      if (!uid) throw new Error('Could not establish secure session');
+      const uid = sessionData.session.user.id;
 
       // 2. Determine unique code
       let code = previewCode;
