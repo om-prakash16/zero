@@ -139,10 +139,12 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       setError(null);
 
       const rawInput = email.trim().toLowerCase();
-      const resolvedEmail =
-        rawInput === 'prakash' || rawInput === 'admin'
-          ? 'prakash.om.global@gmail.com'
-          : rawInput;
+      let resolvedEmail = rawInput;
+      if (rawInput === 'prakash' || rawInput === 'superadmin') {
+        resolvedEmail = 'prakash.om.global@gmail.com';
+      } else if (rawInput === 'roomchat' || rawInput === 'admin') {
+        resolvedEmail = 'admin@roomchat.com';
+      }
 
       const { data, error: signInErr } = await supabase.auth.signInWithPassword({
         email: resolvedEmail,
@@ -780,7 +782,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                         type="text"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="prakash or you@example.com"
+                        placeholder="prakash, roomchat, or you@example.com"
                         required
                         className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/60 pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 focus:border-[#B5282A] focus:bg-white dark:focus:bg-zinc-850 focus:outline-hidden"
                       />
