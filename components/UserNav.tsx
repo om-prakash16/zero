@@ -2,60 +2,68 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
-import { LogIn, LogOut, Loader2, Crown, ShieldCheck, User as UserIcon, LayoutDashboard, Activity } from 'lucide-react';
+import { LogIn, LogOut, Crown, ShieldCheck, User as UserIcon, LayoutDashboard, Activity, UserCheck } from 'lucide-react';
 import { AuthModal } from '@/components/AuthModal';
+import { getPersistentGuestUid } from '@/lib/guestUser';
 
 export function UserNav() {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [imgError, setImgError] = useState(false);
 
   useEffect(() => {
-    // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      // Only treat non-anonymous users as authenticated in the UI
-      if (session?.user && !session.user.is_anonymous) {
-        setUser(session.user);
-      } else {
+    let isCancelled = false;
+
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    // Check active session safely with catch
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        if (isCancelled) return;
+        if (session?.user && !session.user.is_anonymous) {
+          setUser(session.user);
+        } else {
+          setUser(null);
+        }
+      })
+      .catch(() => {
+        if (isCancelled) return;
         setUser(null);
-      }
-      setLoading(false);
-    });
+      });
 
     // Subscribe to auth state updates
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (isCancelled) return;
       if (session?.user && !session.user.is_anonymous) {
         setUser(session.user);
       } else {
         setUser(null);
       }
-      setLoading(false);
     });
 
     return () => {
+      isCancelled = true;
       subscription.unsubscribe();
     };
   }, []);
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // ignore
+    }
     setUser(null);
     setIsMenuOpen(false);
   };
-
-  if (loading) {
-    return (
-      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-800/50">
-        <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
-      </div>
-    );
-  }
 
   const avatarUrl =
     user?.user_metadata?.avatar_url ||
@@ -217,13 +225,30 @@ export function UserNav() {
           )}
         </div>
       ) : (
-        <button
-          onClick={() => setIsAuthOpen(true)}
-          className="flex items-center gap-2 rounded-xl border border-[#B5282A]/30 bg-[#B5282A]/10 hover:bg-[#B5282A]/20 px-3.5 py-1.5 text-xs font-semibold text-[#B5282A] dark:text-[#ff6b6d] transition-all hover:border-[#B5282A]/50 shadow-xs cursor-pointer"
-        >
-          <LogIn className="h-3.5 w-3.5" />
-          <span>Sign In</span>
-        </button>
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                getPersistentGuestUid();
+                window.dispatchEvent(new CustomEvent('crosswire:open-create-room'));
+              }
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-emerald-500/30 dark:border-emerald-500/25 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 transition-all shadow-2xs cursor-pointer"
+            title="Use CROSSWIRE immediately without creating an account"
+          >
+            <UserCheck className="h-3.5 w-3.5" />
+            <span>Guest</span>
+          </button>
+
+          <button
+            onClick={() => setIsAuthOpen(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-[#B5282A]/30 bg-[#B5282A]/10 hover:bg-[#B5282A]/20 px-3 py-1.5 text-xs font-semibold text-[#B5282A] dark:text-[#ff6b6d] transition-all hover:border-[#B5282A]/50 shadow-xs cursor-pointer"
+          >
+            <LogIn className="h-3.5 w-3.5" />
+            <span>Sign In</span>
+          </button>
+        </div>
       )}
 
       {/* Auth Modal */}

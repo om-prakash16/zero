@@ -25,13 +25,18 @@ import {
   Loader2,
   PhoneOff,
   LogOut,
+  Video,
+  MessageSquare,
+  Smartphone,
 } from 'lucide-react';
-import type { Room, Participant, ConversationStatus, JoinRequest, AdmissionMode } from '@/lib/types';
+import type { Room, Participant, ConversationStatus, JoinRequest, AdmissionMode, RoomViewMode } from '@/lib/types';
 import { formatRoomCode } from '@/lib/roomCode';
 import { getLanguageByCode } from '@/lib/types';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { UserNav } from '@/components/UserNav';
+import { PythonEngineStatusBadge } from '@/components/PythonEngineStatusBadge';
+import { PhoneConnectModal } from '@/components/PhoneConnectModal';
 
 type Props = {
   room: Room;
@@ -50,6 +55,8 @@ type Props = {
   onLanguageChange: (newLanguageCode: string) => Promise<void>;
   onLeaveRoom?: () => Promise<void>;
   onEndRoom?: () => Promise<void>;
+  viewMode?: RoomViewMode;
+  onToggleViewMode?: (mode: RoomViewMode) => void;
 };
 
 const STATUS_LABELS: Record<
@@ -123,6 +130,8 @@ export function RoomHeader({
   onLanguageChange,
   onLeaveRoom,
   onEndRoom,
+  viewMode = 'video',
+  onToggleViewMode,
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [isSwitchingLang, setIsSwitchingLang] = useState(false);
@@ -133,6 +142,7 @@ export function RoomHeader({
   const [isParticipantsDropdownOpen, setIsParticipantsDropdownOpen] = useState(false);
   const [isExitModalOpen, setIsExitModalOpen] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
+  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
 
   // Settings form state
   const [capacityInput, setCapacityInput] = useState(room.max_capacity ?? 2);
@@ -425,6 +435,41 @@ export function RoomHeader({
             </button>
           )}
 
+          {/* Real-time Python FastAPI 3.13 Status Badge */}
+          <PythonEngineStatusBadge />
+
+          {/* Video Meet vs Chat View Mode Switcher */}
+          {onToggleViewMode && (
+            <div className="flex items-center p-0.5 rounded-lg bg-slate-100 dark:bg-zinc-850 border border-slate-200 dark:border-zinc-700">
+              <button
+                type="button"
+                onClick={() => onToggleViewMode('video')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  viewMode === 'video'
+                    ? 'bg-white dark:bg-zinc-800 text-rose-600 dark:text-rose-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Google Meet Video View"
+              >
+                <Video className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Meet</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleViewMode('chat')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  viewMode === 'chat'
+                    ? 'bg-white dark:bg-zinc-800 text-rose-600 dark:text-rose-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Text Chat & Mic View"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Chat</span>
+              </button>
+            </div>
+          )}
+
           {/* Per-User Auto-play Voice Toggle */}
           <button
             type="button"
@@ -485,6 +530,17 @@ export function RoomHeader({
             ) : (
               <Copy className="w-3 h-3 text-slate-400 dark:text-zinc-500" />
             )}
+          </button>
+
+          {/* Mobile Phone / QR Connect Button */}
+          <button
+            type="button"
+            onClick={() => setIsPhoneModalOpen(true)}
+            title="Connect Phone / Mobile Device on Same Wi-Fi"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-500/25 transition-all cursor-pointer shadow-2xs"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Phone</span>
           </button>
 
           {/* Leave / End Chat Button */}
@@ -831,6 +887,13 @@ export function RoomHeader({
         </div>,
         document.body
       )}
+
+      {/* Mobile Phone LAN Connect Modal (Scan QR Code from Phone on Same Wi-Fi) */}
+      <PhoneConnectModal
+        isOpen={isPhoneModalOpen}
+        onClose={() => setIsPhoneModalOpen(false)}
+        roomCode={room.code}
+      />
     </header>
   );
 }

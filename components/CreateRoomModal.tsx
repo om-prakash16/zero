@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useSyncExternalStore } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
@@ -23,6 +23,7 @@ import { supabase } from '@/lib/supabase';
 import { getLanguageByCode, type AdmissionMode } from '@/lib/types';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { generateRoomCode, formatRoomCode, getRoomInviteUrl } from '@/lib/roomCode';
+import { getPersistentGuestUid } from '@/lib/guestUser';
 
 interface CreateRoomModalProps {
   isOpen: boolean;
@@ -31,20 +32,19 @@ interface CreateRoomModalProps {
   defaultLanguageCode?: string;
 }
 
-const emptySubscribe = () => () => {};
-
 export function CreateRoomModal({
   isOpen,
   onClose,
   defaultDisplayName = '',
   defaultLanguageCode = 'en',
 }: CreateRoomModalProps) {
-  const isClient = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const [isClient, setIsClient] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsClient(true);
+  }, []);
 
   const [displayName, setDisplayName] = useState(defaultDisplayName);
   const [languageCode, setLanguageCode] = useState(defaultLanguageCode);
@@ -66,21 +66,29 @@ export function CreateRoomModal({
     }
   }, [isOpen]);
 
-  // Sync user display name from auth if not explicitly provided
-  useEffect(() => {
-    if (defaultDisplayName) return;
+  const [isSignedIn, setIsSignedIn] = useState(false);
 
+  // Sync user display name from auth or set friendly guest name
+  useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user && !user.is_anonymous) {
-        const name =
-          user.user_metadata?.full_name ||
-          user.user_metadata?.name ||
-          user.email?.split('@')[0] ||
-          '';
-        if (name) setDisplayName(name);
+        setIsSignedIn(true);
+        if (!defaultDisplayName) {
+          const name =
+            user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            user.email?.split('@')[0] ||
+            '';
+          if (name) setDisplayName(name);
+        }
+      } else {
+        setIsSignedIn(false);
+        if (!defaultDisplayName && !displayName) {
+          setDisplayName(`Guest Speaker ${Math.floor(100 + Math.random() * 900)}`);
+        }
       }
     });
-  }, [defaultDisplayName]);
+  }, [defaultDisplayName, displayName]);
 
   // Regenerate preview code
   const handleRegenerateCode = () => {
@@ -120,61 +128,101 @@ export function CreateRoomModal({
       setIsCreating(true);
       setError(null);
 
-      // 1. Require authenticated (non-anonymous) session
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session || sessionData.session.user.is_anonymous) {
-        throw new Error('You must sign in with an account before creating a room.');
+      // 1. Ensure user ID (authenticated or instant guest - avoiding auth blockage)
+      let uid = '';
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session?.user?.id) {
+          uid = sessionData.session.user.id;
+        } else {
+          const { data: anonData } = await supabase.auth.signInAnonymously();
+          if (anonData.session?.user?.id) {
+            uid = anonData.session.user.id;
+          }
+        }
+      } catch {
+        // ignore
       }
 
-      const uid = sessionData.session.user.id;
+      if (!uid) {
+        uid = getPersistentGuestUid();
+      }
 
-      // 2. Determine unique code
-      let code = previewCode;
-      let attempts = 0;
-      while (attempts < 5) {
-        const { data: existing } = await supabase
+      // 2. Register room with high-performance Python FastAPI engine
+      const lang = getLanguageByCode(languageCode);
+      let roomCode = previewCode;
+
+      try {
+        const pyRes = await fetch('/api/rooms/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: roomCode,
+            creator_id: uid,
+            creator_name: displayName.trim(),
+            language_code: lang.code,
+            language_name: lang.name,
+            max_capacity: Math.max(2, Math.min(16, maxCapacity)),
+            admission_mode: admissionMode,
+          }),
+        });
+        if (pyRes.ok) {
+          const pyData = await pyRes.json();
+          if (pyData?.room?.code) {
+            roomCode = pyData.room.code;
+          }
+        }
+      } catch {
+        // Python backend may be starting or offline
+      }
+
+      // 3. Register in Supabase as well
+      try {
+        let code = roomCode;
+        let attempts = 0;
+        while (attempts < 5) {
+          const { data: existing } = await supabase
+            .from('rooms')
+            .select('id')
+            .eq('code', code)
+            .maybeSingle();
+
+          if (!existing) break;
+          code = generateRoomCode();
+          attempts++;
+        }
+
+        const { data: room } = await supabase
           .from('rooms')
-          .select('id')
-          .eq('code', code)
+          .insert({
+            code,
+            is_active: true,
+            participant_count: 1,
+            creator_id: uid,
+            max_capacity: Math.max(2, Math.min(16, maxCapacity)),
+            admission_mode: admissionMode,
+          })
+          .select()
           .maybeSingle();
 
-        if (!existing) break;
-        code = generateRoomCode();
-        attempts++;
+        if (room) {
+          roomCode = room.code;
+          await supabase.from('participants').insert({
+            room_id: room.id,
+            user_id: uid,
+            display_name: displayName.trim(),
+            language_code: lang.code,
+            language_name: lang.name,
+            is_connected: true,
+          });
+        }
+      } catch (err) {
+        console.warn('Supabase dual-sync warning:', err);
       }
 
-      // 3. Insert Room record
-      const { data: room, error: roomError } = await supabase
-        .from('rooms')
-        .insert({
-          code,
-          is_active: true,
-          participant_count: 0,
-          creator_id: uid,
-          max_capacity: Math.max(2, Math.min(16, maxCapacity)),
-          admission_mode: admissionMode,
-        })
-        .select()
-        .single();
-
-      if (roomError) throw roomError;
-
-      // 4. Insert Creator as First Participant
-      const lang = getLanguageByCode(languageCode);
-      const { error: participantError } = await supabase.from('participants').insert({
-        room_id: room.id,
-        user_id: uid,
-        display_name: displayName.trim(),
-        language_code: lang.code,
-        language_name: lang.name,
-        is_connected: true,
-      });
-
-      if (participantError) throw participantError;
-
-      // 5. Route to Room
+      // 4. Route to Room
       onClose();
-      router.push(`/room/${room.code}`);
+      router.push(`/room/${roomCode}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to allocate room';
       setError(msg);
@@ -219,6 +267,12 @@ export function CreateRoomModal({
             <p className="mt-1 text-xs text-slate-500 dark:text-zinc-400">
               Set up your speaker profile and invite a partner to argue in any language
             </p>
+            {!isSignedIn && (
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 mt-2.5 shadow-2xs">
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Instant Guest Mode · No Account or Sign-in Required</span>
+              </div>
+            )}
           </div>
 
           {/* Error Alert */}

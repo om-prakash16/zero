@@ -11,9 +11,13 @@ import {
   Hash,
   ChevronRight,
   Globe,
+  UserCheck,
+  Smartphone,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { UserNav } from '@/components/UserNav';
+import { PhoneConnectModal } from '@/components/PhoneConnectModal';
+import { getPersistentGuestUid } from '@/lib/guestUser';
 
 interface NavbarProps {
   onStartArgument?: () => void;
@@ -22,6 +26,7 @@ interface NavbarProps {
 
 export function Navbar({ onStartArgument, onJoinRoom }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [phoneModalOpen, setPhoneModalOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -141,6 +146,33 @@ export function Navbar({ onStartArgument, onJoinRoom }: NavbarProps) {
             <span>Join Room</span>
           </button>
 
+          {/* Guest Access Pill */}
+          <button
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                getPersistentGuestUid();
+                window.dispatchEvent(new CustomEvent('crosswire:open-create-room'));
+              }
+            }}
+            type="button"
+            className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-xl border border-emerald-500/30 dark:border-emerald-500/25 transition-all cursor-pointer shadow-2xs"
+            title="Use CROSSWIRE immediately without creating an account"
+          >
+            <UserCheck className="w-3.5 h-3.5" />
+            <span>Guest Room</span>
+          </button>
+
+          {/* Connect Phone on Same Wi-Fi */}
+          <button
+            onClick={() => setPhoneModalOpen(true)}
+            type="button"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-xl border border-emerald-500/30 dark:border-emerald-500/25 transition-all cursor-pointer shadow-2xs"
+            title="Scan QR to open CROSSWIRE on Phone (Same Wi-Fi Network)"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Phone</span>
+          </button>
+
           {/* Primary CTA */}
           <button
             onClick={() => {
@@ -235,6 +267,21 @@ export function Navbar({ onStartArgument, onJoinRoom }: NavbarProps) {
 
               <button
                 onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    getPersistentGuestUid();
+                    window.dispatchEvent(new CustomEvent('crosswire:open-create-room'));
+                  }
+                  setMobileMenuOpen(false);
+                }}
+                type="button"
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-xs text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 dark:border-emerald-500/25 shadow-2xs transition-all cursor-pointer"
+              >
+                <UserCheck className="w-4 h-4" />
+                <span>Instant Guest Mode (No Sign-in)</span>
+              </button>
+
+              <button
+                onClick={() => {
                   if (onJoinRoom) {
                     onJoinRoom();
                   } else {
@@ -248,10 +295,25 @@ export function Navbar({ onStartArgument, onJoinRoom }: NavbarProps) {
                 <Hash className="w-4 h-4 text-slate-500 dark:text-zinc-400" />
                 <span>Join with Room Code</span>
               </button>
+
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setPhoneModalOpen(true);
+                }}
+                type="button"
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-xs text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 dark:border-emerald-500/25 shadow-2xs transition-all cursor-pointer"
+              >
+                <Smartphone className="w-4 h-4" />
+                <span>Connect Phone (Same Wi-Fi)</span>
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Cross-Device Phone QR Connect Modal */}
+      <PhoneConnectModal isOpen={phoneModalOpen} onClose={() => setPhoneModalOpen(false)} />
     </header>
   );
 }

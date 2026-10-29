@@ -44,3 +44,17 @@ next-env.d.ts
 brain.md
 AGENTS.md
 *_REPORT.md
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/

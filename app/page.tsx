@@ -13,25 +13,33 @@ import {
   Radio,
   CheckCircle2,
   Loader2,
+  UserCheck,
+  Zap,
+  Smartphone,
+  Wifi,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { normalizeRoomCode } from '@/lib/roomCode';
+import { normalizeRoomCode, generateRoomCode } from '@/lib/roomCode';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { CreateRoomModal } from '@/components/CreateRoomModal';
 import { AuthModal } from '@/components/AuthModal';
+import { PhoneConnectModal } from '@/components/PhoneConnectModal';
+import { getPersistentGuestUid } from '@/lib/guestUser';
 import { SUPPORTED_LANGUAGES } from '@/lib/types';
 import type { User } from '@supabase/supabase-js';
 
 export default function HomePage() {
   const router = useRouter();
   const [joinCode, setJoinCode] = useState('');
+  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<'create' | 'join' | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [_user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
+  const [isInstantGuestCreating, setIsInstantGuestCreating] = useState(false);
 
   // Track authenticated (non-anonymous) user
   useEffect(() => {
@@ -58,6 +66,17 @@ export default function HomePage() {
     };
   }, []);
 
+  // Listen for global guest room open triggers (e.g., from Navbar / UserNav)
+  useEffect(() => {
+    const handleOpenCreate = () => {
+      setIsCreateModalOpen(true);
+    };
+    window.addEventListener('crosswire:open-create-room', handleOpenCreate);
+    return () => {
+      window.removeEventListener('crosswire:open-create-room', handleOpenCreate);
+    };
+  }, []);
+
   // After successful auth, execute the pending action
   const handleAuthSuccess = () => {
     setIsAuthOpen(false);
@@ -70,26 +89,87 @@ export default function HomePage() {
     setPendingAction(null);
   };
 
-  // Gate: require account before creating room
+  // Direct instant access: open modal immediately without auth gate
   const handleCreateRoomClick = () => {
-    if (!user) {
-      setPendingAction('create');
-      setIsAuthOpen(true);
-      return;
-    }
     setIsCreateModalOpen(true);
+  };
+
+  // 1-Click Instant Guest Room Creation (Zero Sign-In / Zero Sign-Up)
+  const handleInstantGuestRoom = async () => {
+    try {
+      setIsInstantGuestCreating(true);
+      setError('');
+
+      let guestUid = getPersistentGuestUid();
+      try {
+        const { data } = await supabase.auth.signInAnonymously();
+        if (data?.session?.user?.id) {
+          guestUid = data.session.user.id;
+        }
+      } catch {
+        // continue with persistent guest uid
+      }
+
+      const roomCode = generateRoomCode();
+      const guestName = `Guest Speaker ${Math.floor(100 + Math.random() * 900)}`;
+
+      // Dual-register: FastAPI backend + Supabase
+      try {
+        await fetch('/api/rooms/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: roomCode,
+            creator_id: guestUid,
+            creator_name: guestName,
+            language_code: 'en',
+            language_name: 'English',
+            max_capacity: 4,
+            admission_mode: 'auto_approve',
+          }),
+        });
+      } catch {
+        // ignore
+      }
+
+      try {
+        const { data: room } = await supabase
+          .from('rooms')
+          .insert({
+            code: roomCode,
+            is_active: true,
+            participant_count: 1,
+            creator_id: guestUid,
+            max_capacity: 4,
+            admission_mode: 'auto_approve',
+          })
+          .select()
+          .maybeSingle();
+
+        if (room) {
+          await supabase.from('participants').insert({
+            room_id: room.id,
+            user_id: guestUid,
+            display_name: guestName,
+            language_code: 'en',
+            language_name: 'English',
+            is_connected: true,
+          });
+        }
+      } catch {
+        // ignore
+      }
+
+      router.push(`/room/${roomCode}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to launch guest room';
+      setError(msg);
+      setIsInstantGuestCreating(false);
+    }
   };
 
   async function handleJoinRoom(e: React.FormEvent) {
     e.preventDefault();
-
-    // Require authenticated (non-anonymous) account to join rooms
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData.session || sessionData.session.user.is_anonymous) {
-      setPendingAction('join');
-      setIsAuthOpen(true);
-      return;
-    }
 
     const code = normalizeRoomCode(joinCode);
     if (!code) {
@@ -101,38 +181,7 @@ export default function HomePage() {
     setError('');
 
     try {
-
-      // Check room exists
-      const { data: room, error: roomError } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('code', code)
-        .eq('is_active', true)
-        .maybeSingle();
-
-      if (roomError || !room) {
-        setError(`Room "${code}" was not found. Please verify the code or invitation link.`);
-        setIsJoining(false);
-        return;
-      }
-
-      // Check room capacity
-      const { data: participants } = await supabase
-        .from('participants')
-        .select('user_id')
-        .eq('room_id', room.id);
-
-      const { data: currentSession } = await supabase.auth.getSession();
-      const currentUid = currentSession.session?.user?.id;
-      const isAlreadyMember = participants?.some((p) => p.user_id === currentUid);
-
-      if (!isAlreadyMember && (participants?.length ?? 0) >= 2) {
-        setError('Room is full. Maximum 2 participants allowed.');
-        setIsJoining(false);
-        return;
-      }
-
-      router.push(`/room/${room.code}`);
+      router.push(`/room/${code}`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to join room';
       setError(message);
@@ -158,7 +207,10 @@ export default function HomePage() {
           <Radio className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
           <span>Multilingual Live Argument Protocol</span>
           <span className="text-slate-300 dark:text-zinc-700">•</span>
-          <span className="text-slate-500 dark:text-zinc-500">Multilingual conversations</span>
+          <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+            <UserCheck className="w-3 h-3" />
+            No Sign-in or Sign-up Required
+          </span>
         </div>
 
         {/* Headline */}
@@ -268,6 +320,81 @@ export default function HomePage() {
                   {error}
                 </p>
               )}
+            </div>
+
+            <div className="relative flex items-center justify-center">
+              <div className="w-full border-t border-slate-200 dark:border-zinc-800" />
+              <span className="absolute px-3 bg-white dark:bg-[#121215] text-[11px] uppercase tracking-wider text-slate-400 dark:text-zinc-500 font-semibold">
+                or
+              </span>
+            </div>
+
+            {/* Action 3: 1-Click Instant Guest Room (No Sign-in or Sign-up needed) */}
+            <div className="rounded-xl border border-emerald-500/30 dark:border-emerald-500/25 bg-emerald-500/5 dark:bg-emerald-950/20 p-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                  <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  Option 3 · Instant Guest Mode
+                </span>
+                <span className="text-[10px] font-semibold bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                  Zero Auth
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-zinc-400 mb-3">
+                No sign-in or sign-up needed. Instantly launch a multilingual room with live translation, speech-to-speech dubbing, and video.
+              </p>
+              <button
+                type="button"
+                onClick={handleInstantGuestRoom}
+                disabled={isInstantGuestCreating}
+                className="w-full h-11 flex items-center justify-center gap-2 px-5 rounded-xl font-semibold text-xs text-white bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] transition-all shadow-md shadow-emerald-600/25 cursor-pointer disabled:opacity-50"
+              >
+                {isInstantGuestCreating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Allocating Instant Guest Room...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 text-emerald-200" />
+                    <span>Launch 1-Click Guest Room (No Sign-In)</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="relative flex items-center justify-center">
+              <div className="w-full border-t border-slate-200 dark:border-zinc-800" />
+              <span className="absolute px-3 bg-white dark:bg-[#121215] text-[11px] uppercase tracking-wider text-slate-400 dark:text-zinc-500 font-semibold">
+                or
+              </span>
+            </div>
+
+            {/* Action 4: Connect Phone on Same Wi-Fi */}
+            <div className="rounded-xl border border-sky-500/30 dark:border-sky-500/25 bg-sky-500/5 dark:bg-sky-950/20 p-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
+                  <Smartphone className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                  Option 4 · Phone & Laptop on Same Wi-Fi
+                </span>
+                <span className="text-[10px] font-semibold bg-sky-500/20 text-sky-700 dark:text-sky-300 px-2 py-0.5 rounded-full border border-sky-500/30 flex items-center gap-1">
+                  <Wifi className="w-2.5 h-2.5" />
+                  LAN Sync
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-zinc-400 mb-3">
+                Test simultaneously across your phone and laptop on the same network with real-time translation & audio dubbing.
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsPhoneModalOpen(true)}
+                className="w-full h-11 flex items-center justify-center gap-2 px-5 rounded-xl font-semibold text-xs text-white bg-sky-600 hover:bg-sky-500 active:scale-[0.99] transition-all shadow-md shadow-sky-600/25 cursor-pointer"
+              >
+                <Smartphone className="w-4 h-4 text-sky-200" />
+                <span>Show Phone QR Code & Mobile URL</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         </div>
@@ -433,6 +560,12 @@ export default function HomePage() {
           setPendingAction(null);
         }}
         onSuccess={handleAuthSuccess}
+      />
+
+      {/* Cross-Device Phone QR Connect Modal */}
+      <PhoneConnectModal
+        isOpen={isPhoneModalOpen}
+        onClose={() => setIsPhoneModalOpen(false)}
       />
     </div>
   );

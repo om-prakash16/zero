@@ -46,7 +46,7 @@ STRICT RULES:
 Text to translate:
 ${text}`;
 
-  const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.5-pro'];
+  const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash'];
   for (const model of candidateModels) {
     try {
       const res = await ai.models.generateContent({

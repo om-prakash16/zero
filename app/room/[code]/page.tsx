@@ -14,6 +14,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { normalizeRoomCode, formatRoomCode } from '@/lib/roomCode';
+import { getPersistentGuestUid } from '@/lib/guestUser';
 
 type RoomState =
   | 'loading'
@@ -48,87 +49,164 @@ function RoomPageInner() {
 
     async function loadRoom() {
       try {
-        let { data: sessionData } = await supabase.auth.getSession();
-        if (!sessionData.session) {
-          const { data: signInData, error: signInError } = await supabase.auth.signInAnonymously();
-          if (signInError) throw signInError;
-          sessionData = { session: signInData.session };
+        let uid = '';
+        try {
+          let { data: sessionData } = await supabase.auth.getSession();
+          if (!sessionData.session) {
+            const { data: signInData } = await supabase.auth.signInAnonymously();
+            sessionData = { session: signInData?.session || null };
+          }
+          uid = sessionData.session?.user?.id || '';
+        } catch {
+          // ignore
         }
 
-        const uid = sessionData.session?.user?.id;
-        if (!uid) throw new Error('No user session established');
+        if (!uid) {
+          uid = getPersistentGuestUid();
+        }
+
         if (!isMounted) return;
         setUserId(uid);
 
-        // 2. Load room
-        const { data: roomData, error: roomError } = await supabase
-          .from('rooms')
-          .select('*')
-          .eq('code', roomCode)
-          .eq('is_active', true)
-          .single();
+        // 2. Load room: Check Supabase then Python FastAPI
+        let roomObj: Room | null = null;
+        let pyParticipants: Participant[] = [];
 
-        if (roomError || !roomData) {
+        try {
+          const { data: roomData } = await supabase
+            .from('rooms')
+            .select('*')
+            .eq('code', roomCode)
+            .eq('is_active', true)
+            .maybeSingle();
+
+          if (roomData) {
+            roomObj = roomData as Room;
+          }
+        } catch (e) {
+          console.warn('Supabase room load warning:', e);
+        }
+
+        if (!roomObj) {
+          try {
+            const pyRes = await fetch(`/api/rooms/info/${roomCode}`);
+            if (pyRes.ok) {
+              const pyData = await pyRes.json();
+              if (pyData?.room) {
+                const pr = pyData.room;
+                roomObj = {
+                  id: pr.id,
+                  code: pr.code,
+                  is_active: pr.is_active,
+                  creator_id: pr.creator_id,
+                  max_capacity: pr.max_capacity,
+                  admission_mode: pr.admission_mode,
+                  participant_count: pr.participant_count || pr.participants?.length || 1,
+                  created_at: pr.created_at,
+                  updated_at: pr.updated_at,
+                };
+                pyParticipants = (pr.participants || []) as Participant[];
+              }
+            }
+          } catch {
+            // Python backend check failed
+          }
+        }
+
+        if (!roomObj) {
           if (isMounted) setRoomState('not_found');
           return;
         }
 
-        const roomObj = roomData as Room;
         if (!isMounted) return;
         setRoom(roomObj);
 
         // 3. Check existing participants
-        const { data: participantsList } = await supabase
-          .from('participants')
-          .select('*')
-          .eq('room_id', roomObj.id);
+        let participantsList: Participant[] = [];
+        try {
+          const { data } = await supabase
+            .from('participants')
+            .select('*')
+            .eq('room_id', roomObj.id);
+          if (data && data.length > 0) {
+            participantsList = data as Participant[];
+          }
+        } catch {
+          // ignore
+        }
 
-        const myParticipant = participantsList?.find((p) => p.user_id === uid);
-        const hostOrOther = participantsList?.find((p) => p.user_id !== uid);
+        if (participantsList.length === 0 && pyParticipants.length > 0) {
+          participantsList = pyParticipants;
+        }
+
+        const myParticipant = participantsList.find((p) => p.user_id === uid);
+        const hostOrOther = participantsList.find((p) => p.user_id !== uid);
 
         if (myParticipant) {
-          await supabase
-            .from('participants')
-            .update({ is_connected: true, last_seen_at: new Date().toISOString() })
-            .eq('id', myParticipant.id);
+          try {
+            await supabase
+              .from('participants')
+              .update({ is_connected: true, last_seen_at: new Date().toISOString() })
+              .eq('id', myParticipant.id);
+          } catch {}
 
           if (!isMounted) return;
-          setCurrentParticipant(myParticipant as Participant);
-          setOtherParticipant((hostOrOther ?? null) as Participant | null);
+          setCurrentParticipant(myParticipant);
+          setOtherParticipant(hostOrOther ?? null);
 
-          const { data: msgs } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('room_id', roomObj.id)
-            .order('created_at', { ascending: true });
+          let msgs: Message[] = [];
+          try {
+            const { data: dbMsgs } = await supabase
+              .from('messages')
+              .select('*')
+              .eq('room_id', roomObj.id)
+              .order('created_at', { ascending: true });
+            if (dbMsgs) msgs = dbMsgs as Message[];
+          } catch {}
+
+          if (msgs.length === 0) {
+            try {
+              const pyMsgsRes = await fetch(`/api/rooms/${roomCode}/messages`);
+              if (pyMsgsRes.ok) {
+                const pyMsgData = await pyMsgsRes.json();
+                if (pyMsgData?.messages) {
+                  msgs = pyMsgData.messages;
+                }
+              }
+            } catch {}
+          }
 
           if (!isMounted) return;
-          setMessages((msgs ?? []) as Message[]);
+          setMessages(msgs);
           setRoomState('conversation');
           return;
         }
 
         // 4. Check for active or recent join requests
-        const { data: recentReq } = await supabase
-          .from('join_requests')
-          .select('*')
-          .eq('room_id', roomObj.id)
-          .eq('user_id', uid)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        let recentReq: JoinRequest | null = null;
+        try {
+          const { data } = await supabase
+            .from('join_requests')
+            .select('*')
+            .eq('room_id', roomObj.id)
+            .eq('user_id', uid)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (data) recentReq = data as JoinRequest;
+        } catch {}
 
         if (recentReq && recentReq.status === 'pending') {
           if (!isMounted) return;
-          setPendingRequest(recentReq as JoinRequest);
-          setOtherParticipant((hostOrOther ?? null) as Participant | null);
+          setPendingRequest(recentReq);
+          setOtherParticipant(hostOrOther ?? null);
           setRoomState('pending');
           return;
         }
 
         // 5. Check if room is full
         const maxCap = roomObj.max_capacity ?? 2;
-        const count = roomObj.participant_count ?? (participantsList?.length ?? 0);
+        const count = roomObj.participant_count ?? participantsList.length;
 
         if (count >= maxCap) {
           if (!isMounted) return;
@@ -138,7 +216,7 @@ function RoomPageInner() {
 
         // 6. Ready to join
         if (!isMounted) return;
-        setOtherParticipant((hostOrOther ?? null) as Participant | null);
+        setOtherParticipant(hostOrOther ?? null);
         setRoomState('join');
       } catch (err: unknown) {
         if (!isMounted) return;
@@ -157,7 +235,7 @@ function RoomPageInner() {
     };
   }, [roomCode, reloadKey]);
 
-  // Handle Join Submission (Atomic RPC)
+  // Handle Join Submission (Atomic RPC with Python backend fallback)
   const handleJoinRoom = useCallback(
     async (displayName: string, languageCode: string, languageName: string) => {
       if (!room || !userId) return;
@@ -165,54 +243,125 @@ function RoomPageInner() {
       try {
         setErrorMessage('');
 
-        const { data: result, error: rpcError } = await supabase.rpc('request_room_admission', {
-          p_room_id: room.id,
-          p_display_name: displayName,
-          p_language_code: languageCode,
-          p_language_name: languageName,
-        });
+        // 1. Try Supabase RPC first
+        let res: { status: string; message?: string; participant_id?: string; request_id?: string } | null = null;
+        try {
+          const { data: rpcResult, error: rpcError } = await supabase.rpc('request_room_admission', {
+            p_room_id: room.id,
+            p_display_name: displayName,
+            p_language_code: languageCode,
+            p_language_name: languageName,
+          });
+          if (!rpcError && rpcResult) {
+            res = rpcResult as typeof res;
+          }
+        } catch {
+          // Supabase RPC unavailable
+        }
 
-        if (rpcError) throw rpcError;
+        // 2. Python FastAPI engine fallback
+        if (!res) {
+          try {
+            const pyRes = await fetch(`/api/rooms/${room.code}/join`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: userId,
+                display_name: displayName,
+                language_code: languageCode,
+                language_name: languageName,
+              }),
+            });
+            if (pyRes.ok) {
+              const pyData = await pyRes.json();
+              res = {
+                status: pyData.status,
+                message: pyData.message,
+                request_id: pyData.request_id,
+                participant_id: pyData.participant?.id,
+              };
+              if (pyData.participant) {
+                setCurrentParticipant(pyData.participant as Participant);
+              }
+            }
+          } catch (e) {
+            console.warn('Python join endpoint error:', e);
+          }
+        }
 
-        const res = result as {
-          status: string;
-          message?: string;
-          participant_id?: string;
-          request_id?: string;
-        };
+        if (!res) {
+          // Local direct fallback: admit guest immediately
+          const localPart: Participant = {
+            id: 'part-' + Math.random().toString(36).substring(2, 9),
+            room_id: room.id,
+            user_id: userId,
+            display_name: displayName,
+            language_code: languageCode,
+            language_name: languageName,
+            is_connected: true,
+            joined_at: new Date().toISOString(),
+            last_seen_at: new Date().toISOString(),
+          };
+          setCurrentParticipant(localPart);
+          setRoomState('conversation');
+          return;
+        }
 
         if (res.status === 'admitted' || res.status === 'already_joined') {
-          // Admitted! Query participant record
-          const { data: participant, error: partError } = await supabase
-            .from('participants')
-            .select('*')
-            .eq('room_id', room.id)
-            .eq('user_id', userId)
-            .single();
+          if (!currentParticipant) {
+            let participant: Participant | null = null;
+            try {
+              const { data: p } = await supabase
+                .from('participants')
+                .select('*')
+                .eq('room_id', room.id)
+                .eq('user_id', userId)
+                .maybeSingle();
+              if (p) participant = p as Participant;
+            } catch {}
 
-          if (partError || !participant) throw new Error('Could not verify admission record');
-
-          setCurrentParticipant(participant as Participant);
+            if (!participant) {
+              participant = {
+                id: res.participant_id || 'part-' + Math.random().toString(36).substring(2, 9),
+                room_id: room.id,
+                user_id: userId,
+                display_name: displayName,
+                language_code: languageCode,
+                language_name: languageName,
+                is_connected: true,
+                joined_at: new Date().toISOString(),
+                last_seen_at: new Date().toISOString(),
+              };
+            }
+            setCurrentParticipant(participant);
+          }
 
           // Load messages
-          const { data: msgs } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('room_id', room.id)
-            .order('created_at', { ascending: true });
+          let msgs: Message[] = [];
+          try {
+            const { data } = await supabase
+              .from('messages')
+              .select('*')
+              .eq('room_id', room.id)
+              .order('created_at', { ascending: true });
+            if (data) msgs = data as Message[];
+          } catch {}
 
-          setMessages((msgs ?? []) as Message[]);
+          if (msgs.length === 0) {
+            try {
+              const pyMsgsRes = await fetch(`/api/rooms/${room.code}/messages`);
+              if (pyMsgsRes.ok) {
+                const pyMsgData = await pyMsgsRes.json();
+                if (pyMsgData?.messages) msgs = pyMsgData.messages;
+              }
+            } catch {}
+          }
+
+          setMessages(msgs);
           setRoomState('conversation');
         } else if (res.status === 'pending') {
-          // Waiting for host approval
-          const { data: req } = await supabase
-            .from('join_requests')
-            .select('*')
-            .eq('id', res.request_id || '')
-            .single();
-
-          setPendingRequest((req ?? {
-            id: res.request_id,
+          setPendingRequest({
+            id: res.request_id || 'req-' + Math.random().toString(36).substring(2, 9),
             room_id: room.id,
             user_id: userId,
             display_name: displayName,
@@ -221,8 +370,7 @@ function RoomPageInner() {
             status: 'pending',
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-          }) as JoinRequest);
-
+          });
           setRoomState('pending');
         } else if (res.status === 'room_full') {
           setRoomState('full');
@@ -234,7 +382,7 @@ function RoomPageInner() {
         setErrorMessage(msg);
       }
     },
-    [room, userId]
+    [room, userId, currentParticipant]
   );
 
   // Realtime subscription for pending request

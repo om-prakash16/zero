@@ -1,6 +1,6 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useState, useEffect } from 'react';
 import { Sun, Moon } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 
@@ -9,24 +9,14 @@ interface ThemeToggleProps {
   showLabel?: boolean;
 }
 
-const emptySubscribe = () => () => {};
-
 export function ThemeToggle({ className = '', showLabel = false }: ThemeToggleProps) {
   const { theme, toggleTheme } = useTheme();
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const [mounted, setMounted] = useState(false);
 
-  if (!mounted) {
-    return (
-      <div
-        className={`w-9 h-9 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 ${className}`}
-        aria-hidden="true"
-      />
-    );
-  }
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   const isDark = theme === 'dark';
 
@@ -39,15 +29,15 @@ export function ThemeToggle({ className = '', showLabel = false }: ThemeTogglePr
       className={`inline-flex items-center justify-center gap-2 px-2.5 py-1.5 h-9 rounded-lg border text-xs font-medium transition-all duration-200
         border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 shadow-xs
         dark:border-zinc-800 dark:hover:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800 dark:text-zinc-300 dark:shadow-none
-        focus-visible:outline-2 focus-visible:outline-slate-900 dark:focus-visible:outline-white
+        focus-visible:outline-2 focus-visible:outline-slate-900 dark:focus-visible:outline-white cursor-pointer
         ${className}`}
     >
-      {isDark ? (
+      {mounted && isDark ? (
         <Sun className="w-4 h-4 text-amber-400 transition-transform hover:rotate-45" />
       ) : (
-        <Moon className="w-4 h-4 text-slate-600 transition-transform hover:-rotate-12" />
+        <Moon className="w-4 h-4 text-slate-600 dark:text-zinc-300 transition-transform hover:-rotate-12" />
       )}
-      {showLabel && (
+      {showLabel && mounted && (
         <span className="capitalize">{isDark ? 'Light' : 'Dark'}</span>
       )}
     </button>

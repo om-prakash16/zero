@@ -77,7 +77,7 @@ async function testGemini() {
   try {
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       contents: 'Translate "Hello, this is a test argument!" to Spanish. Return ONLY the translation.',
     });
     console.log('✅ Gemini Translation API response:');

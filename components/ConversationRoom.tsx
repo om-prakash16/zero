@@ -16,14 +16,22 @@ import type {
   JoinRequest,
   AdmissionMode,
   MessageTranslation,
+  LiveSubtitle,
+  DubbingMode,
+  RoomViewMode,
 } from '@/lib/types';
 import { getLanguageByCode } from '@/lib/types';
 import { MessageList } from '@/components/MessageList';
 import { SpeakingPanel } from '@/components/SpeakingPanel';
 import { RoomHeader } from '@/components/RoomHeader';
+import { VideoMeetingGrid } from '@/components/VideoMeetingGrid';
+import { MeetingControls } from '@/components/MeetingControls';
+import { AIMeetingNotesModal } from '@/components/AIMeetingNotesModal';
+import { PhoneConnectModal } from '@/components/PhoneConnectModal';
+import { useWebRTC } from '@/lib/hooks/useWebRTC';
 import { v4 as uuidv4 } from 'uuid';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { Globe, PhoneOff } from 'lucide-react';
+import { Globe, PhoneOff, MessageSquare, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 type Props = {
@@ -72,6 +80,16 @@ export function ConversationRoom({
   const [currentlyPlayingId, setCurrentlyPlayingId] = useState<string | null>(null);
   const [isMicActive, setIsMicActive] = useState(false);
   const [systemNotification, setSystemNotification] = useState<string | null>(null);
+  const [isInsecureOrigin] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const isLocal =
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const isHttps = window.location.protocol === 'https:';
+      return !isHttps && !isLocal;
+    }
+    return false;
+  });
+  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState<boolean>(false);
 
   // Audio Preferences (Per-user, local-storage backed)
   const [autoPlayVoice, setAutoPlayVoice] = useState<boolean>(() => {
@@ -88,6 +106,21 @@ export function ConversationRoom({
     }
     return true; // By default voice playback is muted
   });
+
+  // Video Meeting, Real-Time Dubbing & Live Captions State
+  const [viewMode, setViewMode] = useState<RoomViewMode>('video');
+  const [showCaptions, setShowCaptions] = useState(true);
+  const [dubbingMode, setDubbingMode] = useState<DubbingMode>('dubbing');
+  const [liveSubtitle, setLiveSubtitle] = useState<LiveSubtitle | null>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [activeChannel, setActiveChannel] = useState<RealtimeChannel | null>(null);
+  const liveSubtitleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const dubbingModeRef = useRef<DubbingMode>(dubbingMode);
+
+  useEffect(() => {
+    dubbingModeRef.current = dubbingMode;
+  }, [dubbingMode]);
 
   // Refs for stable callbacks & listeners
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -160,6 +193,55 @@ export function ConversationRoom({
       if (isMountedRef.current) setSystemNotification(null);
     }, 4000);
   }, []);
+
+  // WebRTC Video & Audio Calling Engine
+  const {
+    localStream,
+    remoteStream,
+    isCameraOn,
+    isMicOn,
+    isNoiseCancellationOn,
+    noiseMetrics,
+    enrolledVoiceProfiles,
+    isEnrollingVoice,
+    remoteMediaState,
+    connectionState: webrtcConnectionState,
+    videoDevices,
+    audioDevices,
+    selectedVideoDeviceId,
+    selectedAudioDeviceId,
+    toggleCamera,
+    toggleMic,
+    toggleNoiseCancellation,
+    enrollVoiceProfile,
+    switchCamera,
+    switchMicrophone,
+    mediaError,
+    initLocalStream,
+    activateVirtualStream,
+  } = useWebRTC({
+    roomId: room.id,
+    userId,
+    remoteUserId: otherParticipant?.user_id || null,
+    channel: activeChannel,
+    enabled: true,
+  });
+
+  const handleEnrollVoice = useCallback(async () => {
+    try {
+      showNotification('Recording 2.5s voice sample for Speaker Identification...');
+      const prof = await enrollVoiceProfile(currentParticipant.display_name);
+      showNotification(`Voice ID Calibrated! Profile enrolled (${prof.pitch_category}).`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Voice calibration failed';
+      showNotification(msg);
+    }
+  }, [enrollVoiceProfile, currentParticipant.display_name, showNotification]);
+
+  const isMicOnRef = useRef(isMicOn);
+  useEffect(() => {
+    isMicOnRef.current = isMicOn;
+  }, [isMicOn]);
 
   // ─── Lifecycle & Cleanup ──────────────────────────────────────────────────
   useEffect(() => {
@@ -249,13 +331,10 @@ export function ConversationRoom({
     loadRoomDetails();
   }, [room.id, room.creator_id, userId]);
 
-  // ─── Audio Playback Handler ───────────────────────────────────────────────
+  // ─── Audio Playback Handler (Python Neural Voice Dubbing with Browser Fallback) ──
   const playMessageAudio = useCallback(
     (msg: Message, forceManual = false) => {
-      if (!isSpeechSynthesisSupported()) return;
-
       const myLangCode = currentParticipantRef.current.language_code;
-      // Multi-participant translation resolution:
       const myTranslation = msg.translations?.[myLangCode];
       const textToSpeak = myTranslation?.translated_text || msg.translated_text;
       const targetLang = myTranslation ? myLangCode : (msg.target_language || myLangCode);
@@ -276,22 +355,69 @@ export function ConversationRoom({
         setStatus('playing');
       }
 
-      queueSpeech(
-        textToSpeak,
-        targetLang,
-        () => {
-          if (isMountedRef.current) {
-            setCurrentlyPlayingId(msg.id);
-            setStatus('playing');
-          }
-        },
-        () => {
-          if (isMountedRef.current) {
-            setCurrentlyPlayingId((prev) => (prev === msg.id ? null : prev));
-            setStatus('idle');
-          }
+      // 1. Try Python Neural Voice Synthesis (gTTS stream via FastAPI proxy)
+      const pyAudioUrl = `/api/voice/speak?text=${encodeURIComponent(textToSpeak)}&lang=${encodeURIComponent(targetLang)}`;
+      const audio = new Audio(pyAudioUrl);
+
+      let pySucceeded = false;
+      audio.onplay = () => {
+        pySucceeded = true;
+        if (isMountedRef.current) {
+          setCurrentlyPlayingId(msg.id);
+          setStatus('playing');
         }
-      );
+      };
+      audio.onended = () => {
+        if (isMountedRef.current) {
+          setCurrentlyPlayingId((prev) => (prev === msg.id ? null : prev));
+          setStatus('idle');
+        }
+      };
+      audio.onerror = () => {
+        if (!pySucceeded && isSpeechSynthesisSupported()) {
+          // Fallback to browser Web Speech API if Python backend is offline
+          queueSpeech(
+            textToSpeak,
+            targetLang,
+            () => {
+              if (isMountedRef.current) {
+                setCurrentlyPlayingId(msg.id);
+                setStatus('playing');
+              }
+            },
+            () => {
+              if (isMountedRef.current) {
+                setCurrentlyPlayingId((prev) => (prev === msg.id ? null : prev));
+                setStatus('idle');
+              }
+            }
+          );
+        } else if (isMountedRef.current) {
+          setCurrentlyPlayingId(null);
+          setStatus('idle');
+        }
+      };
+
+      audio.play().catch(() => {
+        if (isSpeechSynthesisSupported()) {
+          queueSpeech(
+            textToSpeak,
+            targetLang,
+            () => {
+              if (isMountedRef.current) {
+                setCurrentlyPlayingId(msg.id);
+                setStatus('playing');
+              }
+            },
+            () => {
+              if (isMountedRef.current) {
+                setCurrentlyPlayingId((prev) => (prev === msg.id ? null : prev));
+                setStatus('idle');
+              }
+            }
+          );
+        }
+      });
     },
     [userId]
   );
@@ -529,6 +655,47 @@ export function ConversationRoom({
           }
         }
       )
+      // Live Subtitle broadcast for real-time video captions & instant dubbing
+      .on(
+        'broadcast',
+        { event: 'live_subtitle' },
+        (payload) => {
+          const sub = payload.payload as LiveSubtitle;
+          if (!sub) return;
+          if (isMountedRef.current) {
+            setLiveSubtitle(sub);
+          }
+
+          // If dubbing mode is active and we are the receiver, play speech in our language
+          if (sub.speakerId !== userId && (dubbingModeRef.current === 'dubbing' || dubbingModeRef.current === 'both')) {
+            if (sub.audioDubbingBase64 && autoPlayVoiceRef.current && !isMutedRef.current) {
+              const audio = new Audio(`data:audio/mp3;base64,${sub.audioDubbingBase64}`);
+              audio.play().catch(() => {});
+            } else {
+              playMessageAudio(
+                {
+                  id: sub.id,
+                  room_id: room.id,
+                  sender_id: sub.speakerId,
+                  sender_name: sub.speakerName,
+                  original_text: sub.originalText,
+                  translated_text: sub.translatedText,
+                  source_language: sub.sourceLanguage,
+                  target_language: sub.targetLanguage,
+                  translation_status: 'translated',
+                  created_at: new Date().toISOString(),
+                },
+                false
+              );
+            }
+          }
+
+          if (liveSubtitleTimeoutRef.current) clearTimeout(liveSubtitleTimeoutRef.current);
+          liveSubtitleTimeoutRef.current = setTimeout(() => {
+            if (isMountedRef.current) setLiveSubtitle(null);
+          }, 6000);
+        }
+      )
       .subscribe((subStatus) => {
         if (!isMountedRef.current) return;
         if (subStatus === 'SUBSCRIBED') {
@@ -539,8 +706,10 @@ export function ConversationRoom({
       });
 
     channelRef.current = channel;
+    setActiveChannel(channel);
 
     return () => {
+      setActiveChannel(null);
       supabase.removeChannel(channel);
     };
   }, [room.id, room.creator_id, userId, playMessageAudio, showNotification]);
@@ -709,19 +878,21 @@ export function ConversationRoom({
       setTranslationError('');
 
       try {
-        // 1. Insert message into Supabase
-        const { error: insertError } = await supabase.from('messages').insert({
-          id: messageId,
-          room_id: room.id,
-          sender_id: userId,
-          sender_name: currentParticipantRef.current.display_name,
-          original_text: text.trim(),
-          source_language: sourceLangCode,
-          target_language: primaryTargetLang,
-          translation_status: 'pending',
-        });
-
-        if (insertError) throw insertError;
+        // 1. Insert message into Supabase (if available for authenticated users)
+        try {
+          await supabase.from('messages').insert({
+            id: messageId,
+            room_id: room.id,
+            sender_id: userId,
+            sender_name: currentParticipantRef.current.display_name,
+            original_text: text.trim(),
+            source_language: sourceLangCode,
+            target_language: primaryTargetLang,
+            translation_status: 'pending',
+          });
+        } catch {
+          // Gracefully continue with server-side translation
+        }
 
         // 2. Call server-side Gemini Translation API with multi-target support
         const res = await fetch('/api/translate', {
@@ -788,7 +959,40 @@ export function ConversationRoom({
 
         if (updateError) throw updateError;
 
+        // 5. Broadcast live subtitle for instantaneous floating captions on video tiles
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'live_subtitle',
+            payload: {
+              id: messageId,
+              speakerId: userId,
+              speakerName: currentParticipantRef.current.display_name,
+              sourceLanguage: sourceLangCode,
+              targetLanguage: primaryTargetLang,
+              originalText: text.trim(),
+              translatedText: data.translatedText,
+              timestamp: Date.now(),
+            },
+          });
+        }
+
         if (isMountedRef.current) {
+          setLiveSubtitle({
+            id: messageId,
+            speakerId: userId,
+            speakerName: currentParticipantRef.current.display_name,
+            sourceLanguage: sourceLangCode,
+            targetLanguage: primaryTargetLang,
+            originalText: text.trim(),
+            translatedText: data.translatedText,
+            timestamp: Date.now(),
+          });
+          if (liveSubtitleTimeoutRef.current) clearTimeout(liveSubtitleTimeoutRef.current);
+          liveSubtitleTimeoutRef.current = setTimeout(() => {
+            if (isMountedRef.current) setLiveSubtitle(null);
+          }, 6000);
+
           setMessages((prev) =>
             prev.map((m) =>
               m.id === messageId
@@ -803,8 +1007,8 @@ export function ConversationRoom({
           );
           setStatus('idle');
         }
-      } catch {
-        const errMsg = 'Limit over';
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : 'Message transmission failed';
 
         try {
           await supabase
@@ -887,8 +1091,8 @@ export function ConversationRoom({
           );
           setStatus('idle');
         }
-      } catch {
-        const errMsg = 'Limit over';
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : 'Translation retry failed';
         if (isMountedRef.current) {
           setTranslationError(errMsg);
           setMessages((prev) =>
@@ -961,12 +1165,21 @@ export function ConversationRoom({
       if (isMountedRef.current) {
         setIsMicActive(false);
         if (event.error !== 'no-speech' && event.error !== 'aborted') {
-          setSpeechError(`Microphone error: ${event.error}`);
+          let msg = `Microphone error: ${event.error}`;
+          if (event.error === 'not-allowed') {
+            msg = isInsecureOrigin
+              ? 'Microphone blocked on raw HTTP IP. Please switch to localhost:3000.'
+              : 'Microphone permission denied. Allow microphone in your browser settings.';
+          } else if (event.error === 'service-not-allowed') {
+            msg = 'Speech recognition service is unavailable in this network environment.';
+          }
+          setSpeechError(msg);
+          showNotification(msg);
           setStatus('error');
           if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
           errorTimeoutRef.current = setTimeout(() => {
             if (isMountedRef.current) setStatus('idle');
-          }, 3500);
+          }, 4500);
         } else {
           setStatus('idle');
         }
@@ -986,6 +1199,20 @@ export function ConversationRoom({
       } else {
         setStatus('idle');
       }
+
+      // If mic is still unmuted, automatically resume listening for continuous hands-free conversation
+      if (isMicOnRef.current) {
+        setTimeout(() => {
+          if (isMountedRef.current && isMicOnRef.current) {
+            try {
+              recognition.start();
+              setIsMicActive(true);
+            } catch {
+              // ignore
+            }
+          }
+        }, 150);
+      }
     };
 
     try {
@@ -995,7 +1222,7 @@ export function ConversationRoom({
       setIsMicActive(false);
       setStatus('idle');
     }
-  }, [sendMessage]);
+  }, [sendMessage, isInsecureOrigin, showNotification]);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
@@ -1054,6 +1281,8 @@ export function ConversationRoom({
         onLanguageChange={handleLanguageChange}
         onLeaveRoom={handleLeaveRoom}
         onEndRoom={handleEndRoom}
+        viewMode={viewMode}
+        onToggleViewMode={setViewMode}
       />
 
       {/* Floating System Notification */}
@@ -1066,66 +1295,198 @@ export function ConversationRoom({
         </div>
       )}
 
-      {/* Main Conversation & Messages Area */}
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-center py-16 max-w-sm mx-auto px-4">
-              <div className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-xs flex items-center justify-center text-slate-700 dark:text-zinc-300 mb-4">
-                <span className="text-xl">⚡</span>
-              </div>
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
-                {participants.length > 1
-                  ? 'Active Debate Session'
-                  : 'Awaiting Participants'}
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed mb-4">
-                {participants.length > 1
-                  ? 'Send a message or tap the mic. Original text and translations are synchronized live for all participants.'
-                  : `Share the room code or invitation URL. Configured for up to ${room.max_capacity} participants.`}
-              </p>
-              {participants.length <= 1 && (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-slate-700 dark:text-zinc-300 font-mono shadow-xs">
-                  <span>Room:</span>
-                  <span className="font-bold tracking-wider">{room.code}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          <MessageList
-            messages={messages}
-            userId={userId}
+      {/* View Mode: Video Conference (Google Meet Style) */}
+      {viewMode === 'video' ? (
+        <div className="flex flex-1 relative overflow-hidden bg-slate-950">
+          <VideoMeetingGrid
+            localStream={localStream}
+            remoteStream={remoteStream}
             currentParticipant={currentParticipant}
             otherParticipant={otherParticipant}
-            currentlyPlayingId={currentlyPlayingId}
-            onPlay={handleManualPlay}
-            onRetry={handleRetryTranslation}
-            canPlay={isSpeechSynthesisSupported()}
+            isCameraOn={isCameraOn}
+            isMicOn={isMicOn}
+            remoteMediaState={remoteMediaState}
+            liveSubtitle={liveSubtitle}
+            showCaptions={showCaptions}
+            dubbingMode={dubbingMode}
+            onToggleDubbingMode={() =>
+              setDubbingMode((prev) => (prev === 'dubbing' ? 'subtitles_only' : 'dubbing'))
+            }
+            connectionState={webrtcConnectionState}
+            isTranslating={status === 'translating'}
+            mediaError={mediaError}
+            isInsecureOrigin={isInsecureOrigin}
+            onRetryMedia={() => {
+              void initLocalStream();
+            }}
+            onToggleVirtualStream={() => {
+              activateVirtualStream(currentParticipant.display_name);
+              showNotification('Virtual test camera & synthetic audio track activated!');
+            }}
+            onOpenPhoneModal={() => setIsPhoneModalOpen(true)}
+            localTranscript={transcript}
+            isListening={isMicActive}
           />
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
 
-      {/* Bottom Speaking & Text Input Panel */}
-      <SpeakingPanel
-        status={status}
-        transcript={transcript}
-        textInput={textInput}
-        setTextInput={setTextInput}
-        isMicActive={isMicActive}
-        isInterrupting={isInterrupting}
-        speechError={speechError}
-        translationError={translationError}
-        currentParticipant={currentParticipant}
-        otherParticipant={otherParticipant}
-        onStartListening={startListening}
-        onStopListening={stopListening}
-        onInterrupt={handleInterrupt}
-        onTextSend={handleTextSend}
-        speechSupported={isSpeechRecognitionSupported()}
-        synthSupported={isSpeechSynthesisSupported()}
-      />
+          {/* Collapsible Slide-out Chat Drawer */}
+          {isChatOpen && (
+            <aside className="w-80 sm:w-96 flex flex-col h-full border-l border-slate-800 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md shadow-2xl z-30 transition-all animate-in slide-in-from-right duration-200">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-rose-500" />
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">In-Call Messages</h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsChatOpen(false)}
+                  className="w-7 h-7 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 hover:text-slate-600 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+                <MessageList
+                  messages={messages}
+                  userId={userId}
+                  currentParticipant={currentParticipant}
+                  otherParticipant={otherParticipant}
+                  currentlyPlayingId={currentlyPlayingId}
+                  onPlay={handleManualPlay}
+                  onRetry={handleRetryTranslation}
+                  canPlay={isSpeechSynthesisSupported()}
+                />
+                <div ref={messagesEndRef} />
+              </div>
+
+              <div className="p-3 border-t border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50">
+                <form onSubmit={handleTextSend} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    placeholder={`Type in ${getLanguageByCode(currentParticipant.language_code).name}...`}
+                    disabled={!otherParticipant}
+                    className="flex-1 h-10 px-3 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs text-slate-900 dark:text-white outline-hidden focus:border-rose-500 transition-colors"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!textInput.trim() || !otherParticipant}
+                    className="px-3 h-10 rounded-xl bg-slate-900 dark:bg-zinc-700 hover:bg-rose-600 dark:hover:bg-rose-600 text-white text-xs font-semibold disabled:opacity-40 transition-colors cursor-pointer"
+                  >
+                    Send
+                  </button>
+                </form>
+              </div>
+            </aside>
+          )}
+        </div>
+      ) : (
+        /* View Mode: Traditional Chat List */
+        <div className="flex flex-1 overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+            {messages.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full text-center py-16 max-w-sm mx-auto px-4">
+                <div className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-xs flex items-center justify-center text-slate-700 dark:text-zinc-300 mb-4">
+                  <span className="text-xl">⚡</span>
+                </div>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
+                  {participants.length > 1
+                    ? 'Active Debate Session'
+                    : 'Awaiting Participants'}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed mb-4">
+                  {participants.length > 1
+                    ? 'Send a message or tap the mic. Original text and translations are synchronized live for all participants.'
+                    : `Share the room code or invitation URL. Configured for up to ${room.max_capacity} participants.`}
+                </p>
+                {participants.length <= 1 && (
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-slate-700 dark:text-zinc-300 font-mono shadow-xs">
+                    <span>Room:</span>
+                    <span className="font-bold tracking-wider">{room.code}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <MessageList
+              messages={messages}
+              userId={userId}
+              currentParticipant={currentParticipant}
+              otherParticipant={otherParticipant}
+              currentlyPlayingId={currentlyPlayingId}
+              onPlay={handleManualPlay}
+              onRetry={handleRetryTranslation}
+              canPlay={isSpeechSynthesisSupported()}
+            />
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+      )}
+
+      {/* Bottom Controls Bar: MeetingControls when in video mode, SpeakingPanel when in chat mode */}
+      {viewMode === 'video' ? (
+        <MeetingControls
+          isCameraOn={isCameraOn}
+          isMicOn={isMicOn}
+          onToggleCamera={toggleCamera}
+          onToggleMic={() => {
+            toggleMic();
+            if (isMicOn) {
+              stopListening();
+            } else {
+              startListening();
+            }
+          }}
+          showCaptions={showCaptions}
+          onToggleCaptions={() => setShowCaptions((prev) => !prev)}
+          dubbingMode={dubbingMode}
+          onToggleDubbingMode={() =>
+            setDubbingMode((prev) => (prev === 'dubbing' ? 'subtitles_only' : 'dubbing'))
+          }
+          isChatOpen={isChatOpen}
+          onToggleChat={() => setIsChatOpen((prev) => !prev)}
+          unreadChatCount={0}
+          onLeaveCall={handleLeaveRoom}
+          isHost={room.creator_id === userId}
+          videoDevices={videoDevices}
+          audioDevices={audioDevices}
+          selectedVideoDeviceId={selectedVideoDeviceId}
+          selectedAudioDeviceId={selectedAudioDeviceId}
+          onSelectVideoDevice={switchCamera}
+          onSelectAudioDevice={switchMicrophone}
+          sourceLanguageName={getLanguageByCode(currentParticipant.language_code).name}
+          targetLanguageName={
+            otherParticipant ? getLanguageByCode(otherParticipant.language_code).name : undefined
+          }
+          onOpenNotes={() => setIsNotesOpen(true)}
+          isNoiseCancellationOn={isNoiseCancellationOn}
+          onToggleNoiseCancellation={toggleNoiseCancellation}
+          noiseMetrics={noiseMetrics}
+          onEnrollVoice={handleEnrollVoice}
+          isEnrollingVoice={isEnrollingVoice}
+          enrolledVoiceCount={enrolledVoiceProfiles.length}
+        />
+      ) : (
+        <SpeakingPanel
+          status={status}
+          transcript={transcript}
+          textInput={textInput}
+          setTextInput={setTextInput}
+          isMicActive={isMicActive}
+          isInterrupting={isInterrupting}
+          speechError={speechError}
+          translationError={translationError}
+          currentParticipant={currentParticipant}
+          otherParticipant={otherParticipant}
+          onStartListening={startListening}
+          onStopListening={stopListening}
+          onInterrupt={handleInterrupt}
+          onTextSend={handleTextSend}
+          speechSupported={isSpeechRecognitionSupported()}
+          synthSupported={isSpeechSynthesisSupported()}
+        />
+      )}
 
       {/* Host Terminated / Room Closed Modal */}
       {isRoomEndedByHost && (
@@ -1150,6 +1511,20 @@ export function ConversationRoom({
           </div>
         </div>
       )}
+
+      {/* AI Meeting Notes & Intelligence Modal (Python FastAPI Engine) */}
+      <AIMeetingNotesModal
+        isOpen={isNotesOpen}
+        onClose={() => setIsNotesOpen(false)}
+        roomCode={room.code}
+      />
+
+      {/* Phone Connect QR Modal */}
+      <PhoneConnectModal
+        isOpen={isPhoneModalOpen}
+        onClose={() => setIsPhoneModalOpen(false)}
+        roomCode={room.code}
+      />
     </div>
   );
 }

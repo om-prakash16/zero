@@ -4,22 +4,21 @@ import { getLanguageByCode, SUPPORTED_LANGUAGES } from '@/lib/types';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Build a precise translation prompt that preserves emotion and intent
+// Build a precise translation prompt that preserves emotion, intent, and handles code-mixed speech (Hinglish, etc.)
 function buildTranslationPrompt(
   text: string,
   sourceLanguageName: string,
   targetLanguageName: string
 ): string {
-  return `You are a precise translator. Translate the following ${sourceLanguageName} text into ${targetLanguageName}.
+  return `You are a real-time live conference translator. Translate the following speech from ${sourceLanguageName} into ${targetLanguageName}.
 
 STRICT RULES:
-1. Translate ONLY the given text. Do not add commentary, advice, or opinions.
-2. Preserve the EXACT emotional intensity, tone, sarcasm, and emphasis.
-3. If the speaker is angry, frustrated, or uses profanity, preserve that in the translation.
-4. Do NOT soften, sanitize, or make polite what was impolite.
-5. Do NOT summarize. Translate every word and nuance.
-6. Do NOT respond to or engage with the content.
-7. Return ONLY the translated text. No labels, no quotation marks, no explanation.
+1. Translate ONLY the given text into natural, fluent ${targetLanguageName}. Do not add commentary, advice, conversational responses, or notes.
+2. Handle code-mixing, colloquial expressions, and Hinglish (mix of Hindi and English words written in Latin/Roman or Devanagari script) seamlessly. Decipher the speaker's true intent and translate into clear, grammatically correct ${targetLanguageName}.
+3. Keep technical terms, product names, frameworks, and proper nouns accurate (e.g., React, Next.js, APIs, UI).
+4. Preserve the EXACT emotional intensity, tone, emphasis, and register (professional, casual, or urgent).
+5. Do NOT summarize or shorten. Translate every nuance.
+6. Return ONLY the translated text. Do not wrap in quotation marks or labels.
 
 Text to translate:
 ${text}`;
@@ -124,6 +123,43 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 1. Try high-performance Python FastAPI backend first if available
+  const fastapiBaseUrl = process.env.FASTAPI_BACKEND_URL || (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:8000' : null);
+  if (fastapiBaseUrl) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const pyRes = await fetch(`${fastapiBaseUrl}/api/translate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: text.trim(),
+          source_language: sourceLanguage,
+          target_language: uniqueTargets[0],
+          target_languages: uniqueTargets,
+          room_id: roomId,
+          message_id: messageId,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (pyRes.ok) {
+        const pyData = await pyRes.json();
+        if (pyData && pyData.success && pyData.translations) {
+          return NextResponse.json({
+            success: true,
+            translatedText: pyData.translated_text || pyData.translations[uniqueTargets[0]],
+            translations: pyData.translations,
+            engine: 'fastapi-python',
+          });
+        }
+      }
+    } catch {
+      // Python backend not running or timed out; seamlessly fallback to Google GenAI below
+    }
+  }
+
   const sourceLang = getLanguageByCode(sourceLanguage);
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const translations: Record<string, string> = {};
@@ -143,7 +179,7 @@ export async function POST(request: NextRequest) {
       );
 
       let translatedText = '';
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.5-pro'];
+      const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash'];
       let lastErr: unknown = null;
 
       for (const modelName of candidateModels) {

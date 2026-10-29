@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/lib/supabase';
 import {
@@ -19,7 +19,9 @@ import {
   EyeOff,
   Crown,
   HelpCircle,
+  UserCheck,
 } from 'lucide-react';
+import { getPersistentGuestUid } from '@/lib/guestUser';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -27,14 +29,13 @@ interface AuthModalProps {
   onSuccess?: () => void;
 }
 
-const emptySubscribe = () => () => {};
-
 export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
-  const isClient = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsClient(true);
+  }, []);
 
   // Main modes: 'signin' | 'signup' | 'forgot_password' | 'update_password'
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot_password' | 'update_password'>('signin');
@@ -121,6 +122,30 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       const msg = err instanceof Error ? err.message : 'Google authentication failed';
       setError(msg);
       setIsGoogleLoading(false);
+    }
+  };
+
+  // Instant Guest Access (Skip auth barrier in local development)
+  const handleContinueAsGuest = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      let uid = '';
+      try {
+        const { data } = await supabase.auth.signInAnonymously();
+        uid = data.session?.user?.id || '';
+      } catch {
+        // ignore
+      }
+      if (!uid) {
+        getPersistentGuestUid();
+      }
+      onSuccessRef.current?.();
+      handleClose();
+    } catch {
+      handleClose();
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -759,6 +784,17 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                 <span>Continue with Google</span>
               </button>
 
+              {/* Instant Guest Mode Button */}
+              <button
+                type="button"
+                onClick={handleContinueAsGuest}
+                disabled={isLoading}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/30 px-4 py-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all cursor-pointer shadow-xs"
+              >
+                <Sparkles className="h-4 w-4 text-emerald-500" />
+                <span>Continue as Guest (Instant Access)</span>
+              </button>
+
               {/* Divider */}
               <div className="relative flex items-center justify-center py-1">
                 <div className="grow border-t border-slate-200 dark:border-zinc-800" />
@@ -1393,6 +1429,36 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
               </button>
             </form>
           )}
+
+          {/* Universal Instant Guest Access (No Sign-in or Sign-up required) */}
+          <div className="mt-5 pt-4 border-t border-slate-200/90 dark:border-zinc-800 text-center">
+            <div className="flex items-center gap-2 mb-2.5">
+              <div className="flex-1 h-px bg-slate-200 dark:bg-zinc-800" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                Or Skip Authentication
+              </span>
+              <div className="flex-1 h-px bg-slate-200 dark:bg-zinc-800" />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleContinueAsGuest}
+              className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-emerald-500/30 dark:border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-all cursor-pointer group shadow-2xs"
+            >
+              <div className="flex items-center gap-2.5 text-left">
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold">Continue as Guest</div>
+                  <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-normal">
+                    No sign-in or sign-up needed · Instant access
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-emerald-600 dark:text-emerald-400 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
         </div>
       </div>
     </div>,

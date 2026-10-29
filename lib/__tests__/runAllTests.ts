@@ -10,6 +10,9 @@ const suites = [
   'lib/__tests__/roomCapacityAndAdmission.test.ts',
   'lib/__tests__/edgeCasesAndSecurity.test.ts',
   'lib/__tests__/superadminPlatformControl.test.ts',
+  'lib/__tests__/seniorQAComprehensiveAudit.test.ts',
+  'lib/__tests__/guestRoomAndLan.test.ts',
+  'lib/__tests__/mediaDiagnostics.test.ts',
 ];
 
 console.log('========================================================================');

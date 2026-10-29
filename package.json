@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "backend": "backend\\.venv\\Scripts\\uvicorn.exe backend.main:app --host 0.0.0.0 --port 8000 --reload",
+    "backend:demo": "backend\\.venv\\Scripts\\python.exe backend/demo_strong_python.py",
+    "backend:monitor": "backend\\.venv\\Scripts\\python.exe backend/monitor.py",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

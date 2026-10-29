@@ -119,6 +119,13 @@ export type TranslateResponse = {
   error?: string;
 };
 
+export type WebRTCSignal =
+  | { type: 'ready'; from: string }
+  | { type: 'offer'; offer: RTCSessionDescriptionInit; from: string; to: string }
+  | { type: 'answer'; answer: RTCSessionDescriptionInit; from: string; to: string }
+  | { type: 'candidate'; candidate: RTCIceCandidateInit; from: string; to: string }
+  | { type: 'media_state'; isCameraOn: boolean; isMicOn: boolean; from: string };
+
 // Super Admin & Platform Control Types
 export type UserRole = 'user' | 'room_creator' | 'moderator' | 'admin' | 'superadmin';
 export type UserStatus = 'active' | 'suspended' | 'banned';
@@ -171,4 +178,34 @@ export type PlatformSetting = {
   updated_at: string;
   updated_by: string | null;
 };
+
+// Video Meeting & Real-Time Dubbing Types
+export type ParticipantMediaState = {
+  userId: string;
+  isCameraOn: boolean;
+  isMicOn: boolean;
+  isSpeaking?: boolean;
+};
+
+export type LiveSubtitle = {
+  id: string;
+  speakerId: string;
+  speakerName: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  originalText: string;
+  translatedText: string;
+  audioDubbingBase64?: string;
+  clarity?: string;
+  timestamp: number;
+};
+
+export type DubbingMode = 'dubbing' | 'subtitles_only' | 'both';
+export type RoomViewMode = 'video' | 'split' | 'chat';
+
+export type MediaDeviceOption = {
+  deviceId: string;
+  label: string;
+};
+
 
